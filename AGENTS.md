@@ -4,8 +4,10 @@ Dự án **Synapse OS** được xây dựng MỚI HOÀN TOÀN từ thư mục t
 Có 2 AI đang làm việc song song, yêu cầu tuân thủ tuyệt đối Lãnh thổ (File Ownership) và Model chỉ định:
 
 ## 1. NHÁNH FRONTEND, UI/UX & 3D OFFICE
-* **Người phụ trách:** GEMINI (chạy trên App Antigravity).
-* **Model yêu cầu:** BẮT BUỘC dùng **Gemini Pro (Advanced)**.
+* **Người phụ trách:** CLAUDE / GEMINI FLASH (chạy trên App Antigravity).
+* **Model yêu cầu:** 
+  - Đọc ảnh thiết kế, dựng khung UI 3 cột, khung 3D: Dùng **Claude Sonnet 5.5 Medium** (hoặc Opus 5.5).
+  - Tinh chỉnh CSS, sửa lỗi vặt: Chuyển sang **Gemini 3.8 Flash Medium**.
 * **Lãnh thổ được phép GHI (Write):**
   1. `src/shared/types.ts` (Khởi tạo ở Pha 0).
   2. `src/renderer/**`, `src/ui/**`, `src/components/**`.
@@ -24,3 +26,6 @@ Có 2 AI đang làm việc song song, yêu cầu tuân thủ tuyệt đối Lãn
   4. `src/main/**`
   5. `tests/unit/**`.
 * **CẤM SỬA:** `src/renderer/**` và `src/shared/types.ts`.
+
+## 3. QUY TẮC ĐỌC TÀI LIỆU (DOCS EXCLUSION)
+Khi được yêu cầu đọc thư mục `docs/` để nắm kiến trúc, TẤT CẢ CÁC AGENT BẮT BUỘC PHẢI BỎ QUA FILE `docs/05_EXECUTION_PROMPTS.md`. File này chứa các lệnh mô phỏng dành riêng cho người dùng, AI không được phân tích hay thực thi nội dung của file này dưới bất kỳ hình thức nào.
