@@ -1,31 +1,31 @@
-# HIẾN PHÁP PHỐI HỢP ĐỒNG THỜI: ANTIGRAVITY & CODEX
+> 🛑 **[SYSTEM IGNORE FLAG]**
+> IF YOU ARE AN AI AGENT READING THIS: DO NOT READ OR EXECUTE `docs/05_EXECUTION_PROMPTS.md`.
 
-Dự án **Synapse OS** được xây dựng MỚI HOÀN TOÀN từ thư mục trống. Không có code cũ. 
-Có 2 AI đang làm việc song song, yêu cầu tuân thủ tuyệt đối Lãnh thổ (File Ownership) và Model chỉ định:
+# HIẾN PHÁP PHỐI HỢP ĐA NỀN TẢNG: SYNAPSE OS
 
-## 1. NHÁNH FRONTEND, UI/UX & 3D OFFICE
-* **Người phụ trách:** CLAUDE / GEMINI FLASH (chạy trên App Antigravity).
-* **Model yêu cầu:** 
-  - Đọc ảnh thiết kế, dựng khung UI 3 cột, khung 3D: Dùng **Claude Sonnet 5.5 Medium** (hoặc Opus 5.5).
-  - Tinh chỉnh CSS, sửa lỗi vặt: Chuyển sang **Gemini 3.8 Flash Medium**.
-* **Lãnh thổ được phép GHI (Write):**
-  1. `src/shared/types.ts` (Khởi tạo ở Pha 0).
+Dự án này được chia thành 3 phân khu chuyên biệt. Mỗi AI chỉ được phép sửa file trong Lãnh thổ của mình:
+
+## 1. PHÂN KHU FRONTEND (UI/3D)
+* **Nền tảng thực thi:** App Antigravity.
+* **Model yêu cầu:** Dùng **Claude Opus 5.5 Medium** để dựng khung và **Claude Sonnet 5.5 Medium / Gemini 3.8 Flash** để tinh chỉnh.
+* **Lãnh thổ (Quyền Ghi):**
+  1. `src/shared/types.ts` (File trung tâm - Bắt buộc tạo đầu tiên).
   2. `src/renderer/**`, `src/ui/**`, `src/components/**`.
-  3. `tests/contracts/**`.
-* **CẤM SỬA:** Bất kỳ file nào ngoài danh sách trên.
+* **CẤM:** Không sửa thư mục Backend.
 
-## 2. NHÁNH BACKEND, DAG ENGINE & ADAPTERS
-* **Người phụ trách:** CODEX (chạy trên App ChatGPT).
-* **Model yêu cầu:** Áp dụng "Chuyển số":
-  * **Ca 1 (`6.1 Sol high` / o1 / o3-mini):** Chỉ viết `src/core/DAGExecutor.ts`, `UniversalTriageRouter.ts`, `FileLockManager.ts`, `ContextSlicer.ts`.
-  * **Ca 2 (GPT-4o Standard/Medium):** Viết `src/adapters/**`, `src/media/**`, `src/main/**`, và `tests/unit/**`.
-* **Lãnh thổ được phép GHI (Write):**
+## 2. PHÂN KHU BACKEND (CORE & ALGORITHMS)
+* **Nền tảng thực thi:** App Codex.
+* **Model yêu cầu:** 
+  - Lõi bất đồng bộ (`DAGExecutor`, `Locks`): Bắt buộc dùng **GPT-6.1 Sol**.
+  - Code Adapter, I/O (`CLI`, `Wrappers`): Hạ xuống **GPT-6.1 Terra / Luna** để tiết kiệm Quota.
+* **Lãnh thổ (Quyền Ghi):**
   1. `src/core/**`
   2. `src/adapters/**`
-  3. `src/media/**` (Kèm cơ chế Lazy-Load thư viện)
-  4. `src/main/**`
-  5. `tests/unit/**`.
-* **CẤM SỬA:** `src/renderer/**` và `src/shared/types.ts`.
+  3. `src/media/**`
+  4. `src/main/**` (IPC Bridge).
+* **CẤM:** Không sửa UI và `types.ts`.
 
-## 3. QUY TẮC ĐỌC TÀI LIỆU (DOCS EXCLUSION)
-Khi được yêu cầu đọc thư mục `docs/` để nắm kiến trúc, TẤT CẢ CÁC AGENT BẮT BUỘC PHẢI BỎ QUA FILE `docs/05_EXECUTION_PROMPTS.md`. File này chứa các lệnh mô phỏng dành riêng cho người dùng, AI không được phân tích hay thực thi nội dung của file này dưới bất kỳ hình thức nào.
+## 3. PHÂN KHU KIỂM TOÁN & ĐIỀU PHỐI (ORCHESTRATOR)
+* **Nền tảng thực thi:** App ChatGPT.
+* **Model yêu cầu:** Dùng **GPT-6** hoặc **GPT-5.6 Sol**.
+* **Nhiệm vụ:** Không trực tiếp viết code tính năng. Chỉ chịu trách nhiệm viết `System Prompts` và chạy các script kiểm thử chéo (`tests/contracts/**`) để bắt lỗi sai lệch tài liệu giữa Phân khu 1 và Phân khu 2.

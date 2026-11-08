@@ -1,8 +1,12 @@
 # BẢNG ĐỒNG BỘ TIẾN ĐỘ SONG SONG (SYNAPSE OS)
 
 ## PHA 0: KHỞI TẠO HỢP ĐỒNG (GEMINI PRO)
-- [ ] GEMINI: Khởi tạo project (`package.json`, React, TypeScript, Tailwind/Vite).
-- [ ] GEMINI: Viết `src/shared/types.ts` khớp 100% với `docs/04_SHARED_DATA_CONTRACTS.md`.
+- [x] GEMINI: Khởi tạo project (`package.json`, React, TypeScript, Tailwind/Vite).
+- [x] GEMINI: Viết `src/shared/types.ts` khớp 100% với `docs/04_SHARED_DATA_CONTRACTS.md`.
+
+## PHA 0.5: TÍCH HỢP ELECTRON (CODEX)
+- [ ] CODEX: Cài đặt Electron, electron-builder.
+- [ ] CODEX: Cấu hình `src/main/index.ts` (Main Process) và `preload.ts` (IPC Bridge theo types.ts).
 
 ## PHA 1: CHẠY SONG SONG (CODEX & GEMINI)
 **Nhánh GEMINI (Antigravity):**

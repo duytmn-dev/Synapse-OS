@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/* Design tokens — Dark Mode theo docs/design_reference.png */
+@theme {
+  --color-hq-bg: #0b1220;
+  --color-hq-panel: #111a2b;
+  --color-hq-border: #1f2a3d;
+  --color-hq-accent: #2dd4a7;
+  --color-hq-text: #e5e9f0;
+  --color-hq-muted: #8a94a7;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-hq-bg);
+  color: var(--color-hq-text);
+  font-family: Inter, system-ui, 'Segoe UI', Roboto, sans-serif;
+}
