@@ -5,6 +5,9 @@ import type { AgentQuotaStat } from '../shared/types';
 import { IPC } from './ipc';
 import { DAGExecutor } from '../core/DAGExecutor.ts';
 import { VisualOfficeBridge } from './VisualOfficeBridge.ts';
+import { AgentStatusBridge } from './AgentStatusBridge.ts';
+import { getWorkspaceStorageInfo } from './WorkspaceStorage.ts';
+import { SecretStore } from './SecretStore.ts';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -12,7 +15,9 @@ let mainWindow: BrowserWindow | null = null;
 // Adapters/QuotaTracker will supply quota data in the next phase.
 const quota: AgentQuotaStat[] = [];
 export const dagExecutor = new DAGExecutor();
-let officeBridge: VisualOfficeBridge | undefined;
+export let officeBridge: VisualOfficeBridge | undefined;
+export let agentStatusBridge: AgentStatusBridge | undefined;
+export let secretStore: SecretStore;
 
 function registerIPC(): void {
   for (const [channel, snapshot] of [
@@ -27,6 +32,25 @@ function registerIPC(): void {
     });
   }
   officeBridge = new VisualOfficeBridge(dagExecutor, ipcMain, () => mainWindow?.webContents ?? null);
+  agentStatusBridge = new AgentStatusBridge(ipcMain, () => mainWindow?.webContents ?? null);
+  secretStore = new SecretStore(path.join(app.getPath('userData'), 'secrets'));
+  ipcMain.handle(IPC.saveKey, async (event, agentId: unknown, key: unknown) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('Untrusted IPC sender');
+    if (typeof agentId !== 'string' || typeof key !== 'string') throw new Error('Invalid key request');
+    await secretStore.save(agentId, key);
+    const existing = agentStatusBridge!.snapshot().agents.find((agent) => agent.agent_id === agentId);
+    agentStatusBridge!.update({ agent_id: agentId, connection_status: existing?.connection_status ?? 'DISCONNECTED',
+      worker_model_name: existing?.worker_model_name, keychain_configured: null });
+  });
+  ipcMain.handle(IPC.getStorage, (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) {
+      throw new Error('Untrusted IPC sender');
+    }
+    return getWorkspaceStorageInfo(app.getPath('userData'), app.getAppPath()).then((storage) => {
+      agentStatusBridge?.updateStorage(storage);
+      return storage;
+    });
+  });
 }
 
 async function createWindow(): Promise<void> {
@@ -70,4 +94,4 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('will-quit', () => { officeBridge?.dispose(); });
+app.on('will-quit', () => { officeBridge?.dispose(); agentStatusBridge?.dispose(); ipcMain.removeHandler(IPC.getStorage); ipcMain.removeHandler(IPC.saveKey); });

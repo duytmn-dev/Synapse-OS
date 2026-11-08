@@ -1,15 +1,16 @@
 import type { ReactNode } from 'react';
 import type { ViewMode } from '../chat/types';
-import { IconBell, IconChat, IconChevronDown, IconCube } from '../icons';
+import { IconBell, IconChat, IconChevronDown, IconCube, IconSettings } from '../icons';
 
 interface TopBarProps {
   projectTitle: string;
   mode: ViewMode;
   onModeChange: (m: ViewMode) => void;
   userName: string;
+  onOpenSettings?: () => void;
 }
 
-export function TopBar({ projectTitle, mode, onModeChange, userName }: TopBarProps) {
+export function TopBar({ projectTitle, mode, onModeChange, userName, onOpenSettings }: TopBarProps) {
   const tab = (m: ViewMode, label: string, icon: ReactNode) => (
     <button
       onClick={() => onModeChange(m)}
@@ -38,7 +39,15 @@ export function TopBar({ projectTitle, mode, onModeChange, userName }: TopBarPro
         {tab('chat3d', 'Chat + 3D', <IconCube size={14} />)}
       </div>
 
-      <div className="ml-auto flex items-center gap-5">
+      <div className="ml-auto flex items-center gap-4">
+        <button
+          onClick={onOpenSettings}
+          className="text-hq-muted transition hover:text-hq-accent"
+          aria-label="Cài đặt hệ thống"
+          title="Cài đặt hệ thống (Mạng lưới AI & API)"
+        >
+          <IconSettings size={18} />
+        </button>
         <button className="text-hq-muted hover:text-hq-text" aria-label="Thông báo">
           <IconBell size={18} />
         </button>

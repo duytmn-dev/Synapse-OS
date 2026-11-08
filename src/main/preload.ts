@@ -15,6 +15,10 @@ const api: SynapseAPI = {
   onQuotaUpdated: (callback) => subscribe(IPC.quotaUpdated, callback),
   onTasksUpdated: (callback) => subscribe(IPC.tasksUpdated, callback),
   onOfficeUpdated: (callback) => subscribe(IPC.officeUpdated, callback),
+  getActiveRooms: () => ipcRenderer.invoke(IPC.getActiveRooms),
+  onActiveRoomsUpdated: (callback) => subscribe(IPC.activeRoomsUpdated, callback),
+  getWorkspaceStorage: () => ipcRenderer.invoke(IPC.getStorage),
+  saveAgentKey: (agentId, key) => ipcRenderer.invoke(IPC.saveKey, agentId, key),
 };
 
 contextBridge.exposeInMainWorld('synapse', api);

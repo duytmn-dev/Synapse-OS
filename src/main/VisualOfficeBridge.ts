@@ -9,6 +9,7 @@ export class VisualOfficeBridge {
   private readonly subscriptions: (() => void)[];
   private disposed = false;
   private readonly ipc: Pick<IpcMain, 'handle' | 'removeHandler'>;
+  private readonly taskModels = new Map<string, string>();
 
   constructor(executor: DAGExecutor, ipc: Pick<IpcMain, 'handle' | 'removeHandler'>,
     getContents: () => WebContents | null) {
@@ -35,11 +36,21 @@ export class VisualOfficeBridge {
     this.subscriptions = [
       executor.onTasksUpdated((tasks) => send(IPC.tasksUpdated, tasks)),
       executor.onOfficeUpdated((event) => {
-        this.office.set(`${event.room_id}:${event.desk_index}`, { ...event });
-        send(IPC.officeUpdated, event);
+        const model = event.active_task_code ? this.taskModels.get(event.active_task_code) : undefined;
+        const enriched: VisualOfficeEvent = { ...event, worker_model_name: event.worker_model_name ?? model ?? null };
+        this.office.set(`${event.room_id}:${event.desk_index}`, enriched);
+        send(IPC.officeUpdated, enriched);
       }),
     ];
   }
+
+  /** Called by the backend after a provider confirms the model for this task. */
+  setTaskModel(taskCode: string, model: string): void {
+    if (!taskCode.trim() || !model.trim()) throw new Error('Task code and model are required');
+    this.taskModels.set(taskCode, model);
+  }
+
+  clearTaskModels(): void { this.taskModels.clear(); }
 
   getOffice(): VisualOfficeEvent[] {
     return [...this.office.values()].map((event) => ({ ...event }));
@@ -49,6 +60,7 @@ export class VisualOfficeBridge {
     if (this.disposed) return;
     this.disposed = true;
     this.subscriptions.forEach((unsubscribe) => unsubscribe());
+    this.taskModels.clear();
     this.ipc.removeHandler(IPC.getTasks);
     this.ipc.removeHandler(IPC.getOffice);
   }

@@ -47,11 +47,19 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
+@keyframes light-trail-flow {
+  from { stroke-dashoffset: 48; }
+  to { stroke-dashoffset: 0; }
+}
 .office-typing { animation: office-typing 0.35s ease-in-out infinite alternate; transform-box: fill-box; }
 .office-thinking { animation: office-thinking 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: bottom center; }
 .office-screen { animation: office-screen 0.9s steps(3) infinite; }
 .office-badge > * { animation: office-pop 2s ease-in-out infinite; }
 .office-bubble { animation: office-bubble 1.4s ease-in-out infinite; }
+.office-light-trail {
+  stroke-dasharray: 8 5;
+  animation: light-trail-flow 1.2s linear infinite;
+}
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: #1f2a3d; border-radius: 8px; }
