@@ -22,3 +22,37 @@ body {
   color: var(--color-hq-text);
   font-family: Inter, system-ui, 'Segoe UI', Roboto, sans-serif;
 }
+
+/* Tailwind v4 quét nguồn ngoài thư mục gốc CSS */
+@source "../ui";
+
+/* ───── Hoạt ảnh Văn phòng 3D ───── */
+@keyframes office-typing {
+  from { transform: translateY(0); }
+  to { transform: translateY(-1.2px); }
+}
+@keyframes office-thinking {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-3deg); }
+}
+@keyframes office-screen {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.55; }
+}
+@keyframes office-pop {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+@keyframes office-bubble {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.office-typing { animation: office-typing 0.35s ease-in-out infinite alternate; transform-box: fill-box; }
+.office-thinking { animation: office-thinking 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: bottom center; }
+.office-screen { animation: office-screen 0.9s steps(3) infinite; }
+.office-badge > * { animation: office-pop 2s ease-in-out infinite; }
+.office-bubble { animation: office-bubble 1.4s ease-in-out infinite; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #1f2a3d; border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }

@@ -1,22 +1,22 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AgentQuotaStat, DAGTaskItem, VisualOfficeEvent } from '../shared/types';
+import type { AgentQuotaStat } from '../shared/types';
 import { IPC } from './ipc';
+import { DAGExecutor } from '../core/DAGExecutor.ts';
+import { VisualOfficeBridge } from './VisualOfficeBridge.ts';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 
-// Phase 1 will connect these snapshots and update channels to the core services.
+// Adapters/QuotaTracker will supply quota data in the next phase.
 const quota: AgentQuotaStat[] = [];
-const tasks: DAGTaskItem[] = [];
-const office: VisualOfficeEvent[] = [];
+export const dagExecutor = new DAGExecutor();
+let officeBridge: VisualOfficeBridge | undefined;
 
 function registerIPC(): void {
   for (const [channel, snapshot] of [
     [IPC.getQuota, quota],
-    [IPC.getTasks, tasks],
-    [IPC.getOffice, office],
   ] as const) {
     ipcMain.handle(channel, (event) => {
       if (!mainWindow || event.sender !== mainWindow.webContents ||
@@ -26,6 +26,7 @@ function registerIPC(): void {
       return snapshot;
     });
   }
+  officeBridge = new VisualOfficeBridge(dagExecutor, ipcMain, () => mainWindow?.webContents ?? null);
 }
 
 async function createWindow(): Promise<void> {
@@ -68,3 +69,5 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+
+app.on('will-quit', () => { officeBridge?.dispose(); });
