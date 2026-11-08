@@ -1,4 +1,4 @@
- # BẢNG ĐỒNG BỘ TIẾN ĐỘ SONG SONG (LIVE SYNC BOARD)
+# BẢNG ĐỒNG BỘ TIẾN ĐỘ SONG SONG (SYNAPSE OS)
 
 ## PHA 0: KHỞI TẠO HỢP ĐỒNG (GEMINI PRO)
 - [ ] GEMINI: Khởi tạo project (`package.json`, React, TypeScript, Tailwind/Vite).
@@ -6,16 +6,15 @@
 
 ## PHA 1: CHẠY SONG SONG (CODEX & GEMINI)
 **Nhánh GEMINI (Antigravity):**
-- [ ] Dựng Layout 3 cột (Sidebar Trái, Chat Giữa, 3D Phải).
-- [ ] Sidebar: Bảng Giới hạn Quota 5h/Tuần.
-- [ ] Center: Khung Chat, Code Block (Copy/Run/Apply), Video Preview.
-- [ ] Right: Văn phòng 3D Isometric có nhân vật và huy hiệu (B1, B2) trên đầu. Cây Sơ đồ Task.
+- [ ] Dựng Layout 3 cột, Bảng Giới hạn Quota 5h/Tuần.
+- [ ] Khung Chat, Code Block, Video Preview.
+- [ ] Văn phòng 3D Isometric (Huy hiệu B1, B2) & Cây Sơ đồ Task.
 
 **Nhánh CODEX (ChatGPT):**
-- [ ] `src/core`: DAGExecutor, Triage Router, Blackboard.
-- [ ] `src/adapters`: CLI Adapters, QuotaTracker tính toán % 5h/Tuần.
-- [ ] `src/media`: LocalMediaTools (FFmpeg wrapper).
-- [ ] `src/main`: IPC Bridge bắn sự kiện `VisualOfficeEvent` lên Frontend.
+- [ ] Lõi Backend: DAGExecutor, Triage Router, Blackboard.
+- [ ] CLI Adapters & QuotaTracker.
+- [ ] `LocalMediaTools`: Viết cơ chế Lazy-Load (Tự động tải FFmpeg/Python scripts vào `.plugins/` khi có yêu cầu xử lý media, không nạp cứng vào app).
+- [ ] IPC Bridge bắn sự kiện `VisualOfficeEvent`.
 
 ## PHA 2: KHỚP NỐI TOÀN CỤC
 - [ ] CHỜ KIỂM TRA: Chạy `npx tsc --noEmit` & Build thành công.
