@@ -8,6 +8,11 @@ import { createHash } from 'node:crypto';
 import { checkProviderKey } from '../../src/adapters/ProviderProbe.ts';
 import { ProviderRegistry } from '../../src/adapters/ProviderRegistry.ts';
 import { CodexBrowserAuth } from '../../src/adapters/CodexBrowserAuth.ts';
+import { ClaudeBrowserAuth } from '../../src/adapters/ClaudeBrowserAuth.ts';
+import { AntigravityBrowserAuth } from '../../src/adapters/AntigravityBrowserAuth.ts';
+import { CLIError } from '../../src/adapters/CLIAdapter.ts';
+import { ChatGPTViaCodexAuth } from '../../src/main/ChatGPTViaCodexAuth.ts';
+import { WorkspaceError } from '../../src/core/workspace/WorkspacePaths.ts';
 import { SettingsStore } from '../../src/main/SettingsStore.ts';
 import { SettingsService } from '../../src/main/SettingsService.ts';
 import { SystemSettingsService } from '../../src/main/SystemSettingsService.ts';
@@ -24,6 +29,97 @@ function fixture(t: TestContext) {
   return root;
 }
 const noSecrets = { read: async () => null, save: async () => { throw new Error('Unexpected secret write'); } };
+
+test('ChatGPT reuses Codex login and can unlink without logging out Codex', async (t) => {
+  const store = new SettingsStore(fixture(t));
+  const calls: string[] = [];
+  const auth = new ChatGPTViaCodexAuth(store, { action: async (action) => {
+    calls.push(action);
+    return { connection_status: 'CONNECTED', auth_method: 'ChatGPT · OAuth', quota_5h_percent: 0, quota_week_percent: 24 };
+  } });
+  const linked = await auth.action('CONNECT');
+  assert.equal(linked.connection_status, 'CONNECTED');
+  assert.equal(linked.quota_5h_percent, null);
+  assert.equal(linked.quota_week_percent, null);
+  assert.equal((await auth.action('DISCONNECT')).connection_status, 'DISCONNECTED');
+  assert.equal((await auth.action('CHECK_CLI')).connection_status, 'DISCONNECTED');
+  assert.deepEqual(calls, ['CHECK_CLI']);
+  assert.equal((await auth.action('CONNECT')).connection_status, 'CONNECTED');
+});
+
+test('Claude login and logout require verified CLI status and never invent quota', async (t) => {
+  let loggedIn = false;
+  const calls: string[] = [];
+  const root = fixture(t);
+  const auth = new ClaudeBrowserAuth(root, async (request) => {
+    assert.equal(request.env?.CLAUDE_CONFIG_DIR, path.join(root, 'claude-account'));
+    assert.equal(request.args?.[0], 'auth');
+    const command = request.args![1];
+    calls.push(command);
+    if (command === 'login') loggedIn = true;
+    if (command === 'logout') loggedIn = false;
+    const result = { stdout: JSON.stringify({ loggedIn, authMethod: loggedIn ? 'claude.ai' : 'none', email: 'hidden@example.invalid' }),
+      stderr: '', exitCode: command === 'status' && !loggedIn ? 1 : 0 };
+    if (result.exitCode === 1) throw new CLIError('CLI exited with code 1', result);
+    return result;
+  });
+  const connected = await auth.action('CONNECT');
+  assert.equal(connected.connection_status, 'CONNECTED');
+  assert.equal(connected.quota_5h_percent, null);
+  assert.doesNotMatch(JSON.stringify(connected), /hidden@example/);
+  assert.equal((await auth.action('DISCONNECT')).connection_status, 'DISCONNECTED');
+  assert.deepEqual(calls, ['login', 'status', 'logout', 'status']);
+});
+
+test('Antigravity ACP negotiates browser auth and checks the resulting session', async (t) => {
+  const root = fixture(t);
+  const script = path.join(root, 'agy-fixture.cjs');
+  writeFileSync(script, `
+    let signedIn = false;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { id, method, params } = JSON.parse(line);
+      let result;
+      if (method === 'initialize') {
+        if (params.protocolVersion !== 1) process.exit(2);
+        result = { protocolVersion: 1, authMethods: [{ id: 'oauth-personal' }], agentCapabilities: { auth: { logout: {} } } };
+      } else if (method === 'authenticate') {
+        if (params.methodId !== 'oauth-personal') process.exit(3);
+        signedIn = true;
+        result = {};
+      } else if (method === 'logout') {
+        signedIn = false;
+        result = {};
+      } else if (method === 'session/new' && signedIn) {
+        if (params.mcpServers.length !== 0) process.exit(4);
+        result = { sessionId: 'test-session' };
+      }
+      console.log(JSON.stringify(result
+        ? { jsonrpc: '2.0', id, result }
+        : { jsonrpc: '2.0', id, error: { code: -32000, message: 'Authentication required' } }));
+    });
+  `);
+  const auth = new AntigravityBrowserAuth(root, [process.execPath, script]);
+  assert.equal((await auth.action('CHECK_CLI')).connection_status, 'DISCONNECTED');
+  const connected = await auth.action('CONNECT');
+  assert.equal(connected.connection_status, 'CONNECTED');
+  assert.equal(connected.quota_week_percent, null);
+  assert.equal((await auth.action('DISCONNECT')).connection_status, 'DISCONNECTED');
+});
+
+test('a missing optional CLI does not hide a working account and its partial quota', async (t) => {
+  const root = fixture(t);
+  const settings = new SettingsService(root, noSecrets, undefined, new ProviderRegistry(root, {
+    action: async () => ({ connection_status: 'CONNECTED', auth_method: 'OAuth', quota_5h_percent: 0, quota_week_percent: null }),
+  }, {
+    claude: { display_name: 'Claude', role_description: 'Claude Code', auth: { action: async () => {
+      throw new WorkspaceError('CLAUDE_CLI_NOT_FOUND', 'test CLI missing');
+    } } },
+  }));
+  const { agents } = await settings.network();
+  assert.equal(agents.find((a) => a.agent_id === 'codex')?.quota_5h_percent, 0);
+  assert.equal(agents.find((a) => a.agent_id === 'claude')?.connection_status, 'DISCONNECTED');
+  await assert.rejects(settings.action('claude', 'CONNECT'), /CLAUDE_CLI_NOT_FOUND/);
+});
 
 test('built-in Codex uses browser OAuth without provider config and reads actual quota windows', async (t) => {
   const root = fixture(t);

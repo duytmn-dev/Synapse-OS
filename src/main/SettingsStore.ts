@@ -6,6 +6,7 @@ import { WorkspaceError } from '../core/workspace/WorkspacePaths.ts';
 
 interface StoredSettings {
   defaultAgent?: AgentId;
+  chatgptLinked?: boolean;
   appearance?: AppearanceAndGraphSettings;
   agents: Partial<Record<AgentId, { fallback?: boolean; threshold?: number }>>;
 }
@@ -17,10 +18,15 @@ export function validateAppearance(value: unknown): asserts value is AppearanceA
 export class SettingsStore {
   private tail: Promise<unknown> = Promise.resolve();
   constructor(private readonly userData: string) {}
+  async isChatGPTLinked(): Promise<boolean> { return (await this.read()).chatgptLinked !== false; }
+  setChatGPTLinked(linked: boolean): Promise<void> {
+    return this.update((settings) => { settings.chatgptLinked = linked; });
+  }
   async read(): Promise<StoredSettings> {
     try {
       const parsed = JSON.parse(await readFile(path.join(this.userData, 'settings.json'), 'utf8')) as StoredSettings;
       if (!parsed || typeof parsed.agents !== 'object' || !parsed.agents) throw new Error('Invalid settings');
+      if (parsed.chatgptLinked !== undefined && typeof parsed.chatgptLinked !== 'boolean') throw new Error('Invalid account link');
       if (parsed.appearance) validateAppearance(parsed.appearance);
       for (const [id, value] of Object.entries(parsed.agents)) {
         if (!['codex', 'gemini', 'claude', 'chatgpt'].includes(id) || !value ||

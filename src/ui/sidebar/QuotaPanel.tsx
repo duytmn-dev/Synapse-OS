@@ -42,10 +42,11 @@ export function QuotaPanel({ quota, live = false }: QuotaPanelProps) {
           const stat = quota.find(
             (q) => q.agent_id.toLowerCase() === cfg.id || (cfg.id === 'gemini' && q.agent_id.toLowerCase().includes('gemini'))
           );
-          const hasData = stat !== undefined && (stat.usage_5h_percent > 0 || stat.usage_week_percent > 0);
-          const p5h = stat?.usage_5h_percent ?? 0;
-          const pWeek = stat?.usage_week_percent ?? 0;
-          const isWarning = p5h >= 80;
+          const p5h = stat?.usage_5h_percent ?? null;
+          const pWeek = stat?.usage_week_percent ?? null;
+          const isWarning = stat?.connection_status === 'OUT_OF_QUOTA' || (p5h ?? 0) >= 80;
+          const status = stat?.connection_status === 'CONNECTED' ? 'Đã kết nối'
+            : stat?.connection_status === 'OUT_OF_QUOTA' ? 'Hết quota' : 'Chưa kết nối';
 
           return (
             <div key={cfg.id} className="flex flex-col gap-1.5">
@@ -53,18 +54,20 @@ export function QuotaPanel({ quota, live = false }: QuotaPanelProps) {
                 <div className="flex items-center gap-2">
                   <span
                     className="h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: cfg.color }}
+                    style={{ backgroundColor: cfg.color, opacity: stat?.connection_status === 'DISCONNECTED' ? 0.4 : 1 }}
+                    title={status}
                   />
                   <span className="text-[12px] font-medium text-[#9DB0C8]">
                     {cfg.name}
                   </span>
+                  {stat?.connection_status && <span className="text-[10px] text-[#8297B2]">{status}</span>}
                 </div>
                 <span
                   className={`font-mono text-[11px] font-normal ${
                     isWarning ? 'text-[#FFC075]' : 'text-[#9DB0C8]'
                   }`}
                 >
-                  {hasData ? `${p5h}% / ${pWeek}%` : '--% / --%'}
+                  {p5h === null ? '—' : `${p5h}%`} / {pWeek === null ? '—' : `${pWeek}%`}
                 </span>
               </div>
 
@@ -73,7 +76,7 @@ export function QuotaPanel({ quota, live = false }: QuotaPanelProps) {
                 <div
                   className="h-full rounded-full transition-all duration-300"
                   style={{
-                    width: `${Math.min(Math.max(p5h, 0), 100)}%`,
+                    width: `${Math.min(Math.max(p5h ?? 0, 0), 100)}%`,
                     backgroundColor: cfg.color,
                   }}
                 />

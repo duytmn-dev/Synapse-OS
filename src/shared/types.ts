@@ -181,8 +181,9 @@ export type AgentBrandId = AgentId | string;
 
 export interface AgentQuotaStat {
   agent_id: AgentBrandId;
-  usage_5h_percent: number;
-  usage_week_percent: number;
+  usage_5h_percent: number | null;
+  usage_week_percent: number | null;
+  connection_status?: AgentSettingsProfile['connection_status'];
 }
 
 export interface DAGTaskItem {

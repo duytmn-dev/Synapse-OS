@@ -4,6 +4,7 @@ export const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 export interface QuotaLimits { fiveHours: number; week: number }
 export interface UsageRecord { id: string; units: number; timestamp: number }
+type MeasuredQuotaStat = AgentQuotaStat & { usage_5h_percent: number; usage_week_percent: number };
 
 /** Rolling windows (now-duration, now], using the same unit as the configured
  * provider limits (requests, tokens, credits...). Never infers limits from a brand.
@@ -41,7 +42,7 @@ export class QuotaTracker {
     this.refresh();
   }
 
-  getStats(at = this.now()): AgentQuotaStat[] {
+  getStats(at = this.now()): MeasuredQuotaStat[] {
     if (!Number.isSafeInteger(at) || at < 0) throw new Error('Invalid quota timestamp');
     return [...this.agents].map(([agent, { limits, records }]) => {
       let five = 0n; let week = 0n;

@@ -6,6 +6,7 @@ import { requiredText, WorkspaceError } from '../core/workspace/WorkspacePaths.t
 import { validateAgent } from '../core/concurrency/FileLockManager.ts';
 
 export type ProviderStatus = Pick<AgentSettingsProfile, 'connection_status' | 'auth_method' | 'quota_5h_percent' | 'quota_week_percent'> & { worker_model_name?: string };
+export type ProviderAction = 'CONNECT' | 'DISCONNECT' | 'REFRESH' | 'CHECK_CLI';
 export interface ProviderConfig {
   display_name: string;
   role_description: string;
@@ -14,18 +15,22 @@ export interface ProviderConfig {
 const codexProfile = { display_name: 'Codex', role_description: 'Thực thi mã nguồn và DAG pipelines' };
 type ProviderDetails = Pick<ProviderConfig, 'display_name' | 'role_description'>;
 type ProviderEntry = ProviderConfig | ProviderDetails;
-type BrowserAuth = Pick<import('./CodexBrowserAuth.ts').CodexBrowserAuth, 'action'>;
+export type BrowserAuth = { action(action: ProviderAction): Promise<ProviderStatus> };
+export type BrowserProviders = Partial<Record<AgentId, ProviderDetails & { auth: BrowserAuth }>>;
 
 /** Trusted backend configuration. CLI wrappers must normalize their verified
  * provider response, including quota, into ProviderStatus JSON. No guessed flags. */
 export class ProviderRegistry {
-  constructor(private readonly userData: string, private readonly codexAuth?: BrowserAuth) {}
+  private readonly browser: BrowserProviders;
+  constructor(private readonly userData: string, codexAuth?: BrowserAuth, otherProviders: BrowserProviders = {}) {
+    this.browser = { ...(codexAuth ? { codex: { ...codexProfile, auth: codexAuth } } : {}), ...otherProviders };
+  }
   async configurations(): Promise<Partial<Record<AgentId, ProviderEntry>>> {
     let input: unknown;
     try { input = JSON.parse(await readFile(path.join(this.userData, 'agent-providers.json'), 'utf8')); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Cannot read provider configuration');
-      if (!this.codexAuth) throw new WorkspaceError('PROVIDER_NOT_CONFIGURED', 'Configure agent-providers.json in userData');
+      if (!Object.keys(this.browser).length) throw new WorkspaceError('PROVIDER_NOT_CONFIGURED', 'Configure agent-providers.json in userData');
       input = {};
     }
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Expected agent configuration object');
@@ -45,7 +50,10 @@ export class ProviderRegistry {
       }
     }
     const configured = input as Partial<Record<AgentId, ProviderEntry>>;
-    if (this.codexAuth && !configured.codex) configured.codex = codexProfile;
+    for (const [id, provider] of Object.entries(this.browser)) {
+      const agent = id as AgentId;
+      configured[agent] ??= { display_name: provider.display_name, role_description: provider.role_description };
+    }
     if (!Object.keys(configured).length) throw new WorkspaceError('PROVIDER_NOT_CONFIGURED', 'No configured providers');
     return configured;
   }
@@ -61,7 +69,7 @@ export class ProviderRegistry {
   }
   async status(agent: AgentId): Promise<ProviderStatus> {
     const config = await this.config(agent);
-    if (!('commands' in config)) return this.codexAuth!.action('CHECK_CLI');
+    if (!('commands' in config)) return this.browser[agent]!.auth.action('CHECK_CLI');
     let status: ProviderStatus;
     try { status = JSON.parse(await this.execute(config.commands.status)) as ProviderStatus; }
     catch (error) { if (error instanceof WorkspaceError) throw error; throw new WorkspaceError('PROVIDER_STATUS_INVALID', 'Status command must return JSON'); }
@@ -75,9 +83,9 @@ export class ProviderRegistry {
     return { connection_status: status.connection_status, auth_method: status.auth_method,
       quota_5h_percent: status.quota_5h_percent, quota_week_percent: status.quota_week_percent, worker_model_name: status.worker_model_name };
   }
-  async action(agent: AgentId, action: 'CONNECT' | 'DISCONNECT' | 'REFRESH' | 'CHECK_CLI'): Promise<ProviderStatus> {
+  async action(agent: AgentId, action: ProviderAction): Promise<ProviderStatus> {
     const config = await this.config(agent);
-    if (!('commands' in config)) return this.codexAuth!.action(action);
+    if (!('commands' in config)) return this.browser[agent]!.auth.action(action);
     if (action !== 'REFRESH') {
       const name = { CONNECT: 'connect', DISCONNECT: 'disconnect', CHECK_CLI: 'check_cli' }[action] as 'connect' | 'disconnect' | 'check_cli';
       const command = config.commands[name];

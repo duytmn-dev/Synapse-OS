@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import type {
   AgentId,
   AgentQuotaStat,
@@ -53,12 +53,12 @@ export function getBridge() {
   return typeof window !== 'undefined' && window.synapse ? window.synapse : undefined;
 }
 
-const INITIAL_QUOTA: AgentQuotaStat[] = [
-  { agent_id: 'chatgpt', usage_5h_percent: 0, usage_week_percent: 0 },
-  { agent_id: 'codex', usage_5h_percent: 0, usage_week_percent: 0 },
-  { agent_id: 'gemini', usage_5h_percent: 0, usage_week_percent: 0 },
-  { agent_id: 'claude', usage_5h_percent: 0, usage_week_percent: 0 },
-];
+const toQuota = (agent: AgentSettingsProfile): AgentQuotaStat => ({
+  agent_id: agent.agent_id,
+  connection_status: agent.connection_status,
+  usage_5h_percent: agent.quota_5h_percent,
+  usage_week_percent: agent.quota_week_percent,
+});
 
 const INITIAL_NETWORK_SETTINGS: AINetworkSettings = {
   default_chat_agent_id: 'auto',
@@ -128,8 +128,9 @@ const INITIAL_UPDATE_STATUS: UpdateStatus = {
 
 export function useSynapseBridge() {
   const bridge = getBridge();
+  const updatedAgents = useRef(new Set<AgentId>());
   const [state, setState] = useState<SynapseState>({
-    quota: INITIAL_QUOTA,
+    quota: [],
     tasks: [],
     office: [],
     activeRooms: [],
@@ -164,9 +165,8 @@ export function useSynapseBridge() {
 
         const currentHash = projects[0]?.project_hash ?? null;
 
-        const [quotaSnap, tasksSnap, officeSnap, activeRoomsSnap, networkSnap, appearanceSnap, toolsSnap, updatesSnap, storageSnap, sessionsSnap, graphSnap] =
+        const [tasksSnap, officeSnap, activeRoomsSnap, networkSnap, appearanceSnap, toolsSnap, updatesSnap, storageSnap, sessionsSnap, graphSnap] =
           await Promise.all([
-            bridge.getQuota ? bridge.getQuota().catch(() => []) : Promise.resolve([]),
             bridge.getTasks ? bridge.getTasks().catch(() => []) : Promise.resolve([]),
             bridge.getOffice ? bridge.getOffice().catch(() => []) : Promise.resolve([]),
             bridge.getActiveRooms ? bridge.getActiveRooms().catch(() => null) : Promise.resolve(null),
@@ -182,7 +182,10 @@ export function useSynapseBridge() {
         if (!disposed) {
           setState((prev) => ({
             ...prev,
-            quota: quotaSnap && quotaSnap.length > 0 ? quotaSnap : prev.quota,
+            quota: networkSnap ? [
+              ...prev.quota.filter((q) => !networkSnap.agents.some((profile) => profile.agent_id === q.agent_id && !updatedAgents.current.has(profile.agent_id))),
+              ...networkSnap.agents.filter((profile) => !updatedAgents.current.has(profile.agent_id)).map(toQuota),
+            ] : prev.quota,
             tasks: tasksSnap ?? prev.tasks,
             office: officeSnap ?? prev.office,
             activeRooms: activeRoomsSnap?.active_rooms ?? prev.activeRooms,
@@ -193,7 +196,8 @@ export function useSynapseBridge() {
             networkSettings: networkSnap ? {
               ...networkSnap,
               agents: prev.networkSettings.agents.map((agent) =>
-                networkSnap.agents.find((profile) => profile.agent_id === agent.agent_id) ?? agent),
+                updatedAgents.current.has(agent.agent_id) ? agent :
+                  networkSnap.agents.find((profile) => profile.agent_id === agent.agent_id) ?? agent),
             } : prev.networkSettings,
             appearanceSettings: (appearanceSnap as AppearanceSettings) ?? prev.appearanceSettings,
             toolDependencies: toolsSnap && toolsSnap.length > 0 ? toolsSnap : prev.toolDependencies,
@@ -379,42 +383,27 @@ export function useSynapseBridge() {
   // Các action IPC thực thi gọi thẳng vào bridge
   const agentConnectionAction = useCallback(
     async (agentId: AgentId, action: 'CONNECT' | 'DISCONNECT' | 'REFRESH' | 'CHECK_CLI' | 'CHECK_API'): Promise<AgentSettingsProfile> => {
-      if (bridge?.agentConnectionAction) {
-        const updated = await bridge.agentConnectionAction(agentId, action);
+      if (!bridge?.agentConnectionAction) throw new Error('Hãy mở Synapse OS bằng ứng dụng Electron để đăng nhập agent.');
+      const updated = await bridge.agentConnectionAction(agentId, action);
+      const applyProfile = (profile: AgentSettingsProfile) => {
+        updatedAgents.current.add(profile.agent_id);
         setState((s) => ({
           ...s,
+          quota: [...s.quota.filter((entry) => entry.agent_id !== profile.agent_id), toQuota(profile)],
           networkSettings: {
             ...s.networkSettings,
-            agents: s.networkSettings.agents.map((a) => (a.agent_id === agentId ? updated : a)),
+            agents: s.networkSettings.agents.map((a) => a.agent_id === profile.agent_id ? profile : a),
           },
         }));
-        return updated;
+      };
+      applyProfile(updated);
+      if (action !== 'CHECK_API' && (agentId === 'codex' || agentId === 'chatgpt')) {
+        const linkedAgent = agentId === 'codex' ? 'chatgpt' : 'codex';
+        void bridge.agentConnectionAction(linkedAgent, 'CHECK_CLI').then(applyProfile).catch(() => {});
       }
-      if (agentId === 'codex') throw new Error('Hãy mở Synapse OS bằng ứng dụng Electron để đăng nhập Codex.');
-      const agent = state.networkSettings.agents.find((a) => a.agent_id === agentId);
-      const nextStatus = action === 'DISCONNECT' ? 'DISCONNECTED' : 'CONNECTED';
-      const fallbackProfile: AgentSettingsProfile = agent
-        ? { ...agent, connection_status: nextStatus as any }
-        : {
-            agent_id: agentId,
-            display_name: agentId,
-            role_description: '',
-            connection_status: nextStatus as any,
-            auth_method: 'OAuth',
-            quota_5h_percent: 0,
-            quota_week_percent: 0,
-            fallback_api: { is_configured: false, use_fallback_on_error: false, is_valid: false },
-          };
-      setState((s) => ({
-        ...s,
-        networkSettings: {
-          ...s.networkSettings,
-          agents: s.networkSettings.agents.map((a) => (a.agent_id === agentId ? fallbackProfile : a)),
-        },
-      }));
-      return fallbackProfile;
+      return updated;
     },
-    [bridge, state.networkSettings]
+    [bridge]
   );
 
   const setFallbackOnError = useCallback(

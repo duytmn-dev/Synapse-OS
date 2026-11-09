@@ -20,11 +20,14 @@ export class SettingsService {
   }
   private serial<T>(agent: AgentId, work: () => Promise<T>): Promise<T> {
     validateAgent(agent);
-    const next = (this.queues.get(agent) ?? Promise.resolve()).catch(() => {}).then(work);
-    this.queues.set(agent, next);
-    void next.finally(() => { if (this.queues.get(agent) === next) this.queues.delete(agent); }).catch(() => {});
+    const key = agent === 'chatgpt' ? 'codex' : agent;
+    const next = (this.queues.get(key) ?? Promise.resolve()).catch(() => {}).then(work);
+    this.queues.set(key, next);
+    void next.finally(() => { if (this.queues.get(key) === next) this.queues.delete(key); }).catch(() => {});
     return next;
   }
+  isChatGPTLinked(): Promise<boolean> { return this.settings.isChatGPTLinked(); }
+  setChatGPTLinked(linked: boolean): Promise<void> { return this.settings.setChatGPTLinked(linked); }
   private digest(key: string): string { return createHash('sha256').update(key).digest('hex'); }
   async profile(agent: AgentId, supplied?: ProviderStatus): Promise<AgentSettingsProfile> {
     validateAgent(agent);
@@ -45,7 +48,17 @@ export class SettingsService {
     const defaultAgent = (await this.settings.read()).defaultAgent ??
       (configs.codex && !('commands' in configs.codex) ? 'codex' : undefined);
     if (!defaultAgent || !configs[defaultAgent]) throw new WorkspaceError('DEFAULT_AGENT_NOT_CONFIGURED', 'Select a configured default chat agent');
-    return { default_chat_agent_id: defaultAgent, agents: await Promise.all((Object.keys(configs) as AgentId[]).map((agent) => this.profile(agent))) };
+    const agents = await Promise.all((Object.keys(configs) as AgentId[]).map(async (agent) => {
+      try { return await this.profile(agent); }
+      catch (error) {
+        const config = configs[agent]!;
+        if ('commands' in config || !(error instanceof WorkspaceError)) throw error;
+        return this.profile(agent, { connection_status: 'DISCONNECTED',
+          auth_method: error.code.endsWith('_CLI_NOT_FOUND') ? 'Chưa tìm thấy CLI' : 'Không kiểm tra được kết nối',
+          quota_5h_percent: null, quota_week_percent: null });
+      }
+    }));
+    return { default_chat_agent_id: defaultAgent, agents };
   }
   async setDefault(agent: string): Promise<AINetworkSettings> {
     validateAgent(agent); await this.profile(agent);

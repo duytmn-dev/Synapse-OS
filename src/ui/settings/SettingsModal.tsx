@@ -82,22 +82,22 @@ export function SettingsModal(props: SettingsModalProps) {
   const handleConnectionAction = async (agentId: AgentId, action: 'CONNECT' | 'DISCONNECT' | 'REFRESH' | 'CHECK_CLI' | 'CHECK_API') => {
     setActionLoading((s) => ({ ...s, [agentId]: action }));
     try {
-      if (onAgentConnectionAction) {
-        await onAgentConnectionAction(agentId, action);
-      }
+      if (!onAgentConnectionAction) throw new Error('Chưa có kết nối với ứng dụng Electron.');
+      const profile = await onAgentConnectionAction(agentId, action);
       if (action === 'CHECK_API') {
-        showNotice(`✓ API Key của ${agentId.toUpperCase()} đã kiểm tra kết nối hợp lệ.`);
+        showNotice(profile.fallback_api.is_valid ? `✓ API Key của ${agentId.toUpperCase()} hợp lệ.` : 'Nhà cung cấp không chấp nhận API key đã lưu.');
       } else if (action === 'CHECK_CLI') {
-        showNotice(`✓ Phiên CLI của ${agentId.toUpperCase()} đang hoạt động bình thường.`);
+        showNotice(profile.connection_status === 'DISCONNECTED' ? `${agentId.toUpperCase()} chưa đăng nhập.` : `Đã xác nhận phiên ${agentId.toUpperCase()}.`);
       } else if (action === 'DISCONNECT') {
         showNotice(`Đã ngắt kết nối phiên làm việc của ${agentId.toUpperCase()}.`);
       } else if (action === 'CONNECT') {
         showNotice(`Đã kết nối thành công tới ${agentId.toUpperCase()}.`);
       } else if (action === 'REFRESH') {
-        showNotice(`Đã làm mới token xác thực cho ${agentId.toUpperCase()}.`);
+        showNotice(profile.connection_status === 'DISCONNECTED' ? `${agentId.toUpperCase()} chưa đăng nhập.` : `Đã cập nhật trạng thái ${agentId.toUpperCase()}.`);
       }
-    } catch (err: any) {
-      showNotice(`Lỗi: ${err?.message || 'Thao tác không thành công'}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Thao tác không thành công';
+      showNotice(message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ''));
     } finally {
       setActionLoading((s) => ({ ...s, [agentId]: null }));
     }
@@ -345,7 +345,7 @@ export function SettingsModal(props: SettingsModalProps) {
                   {networkSettings.agents.map((agent) => {
                     const meta = getAgentMeta(agent.agent_id);
                     const isExpanded = expandedFallbackAgentId === agent.agent_id;
-                    const isConnected = agent.connection_status === 'CONNECTED';
+                    const isConnected = agent.connection_status !== 'DISCONNECTED';
                     const isShowKey = showKeyAgentId[agent.agent_id];
                     const rawInputKey = inputKeys[agent.agent_id] || '';
                     const isLoading = actionLoading[agent.agent_id];
