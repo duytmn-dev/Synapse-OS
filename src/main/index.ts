@@ -17,6 +17,8 @@ import { CLIAdapter, type AgentCLIConfig } from '../adapters/CLIAdapter.ts';
 import { SettingsService } from './SettingsService.ts';
 import { SystemSettingsService } from './SystemSettingsService.ts';
 import { createSettingsHandlers, registerSettingsCredentials } from './SettingsHandlers.ts';
+import { KnowledgeGraphService } from '../adapters/graphify/KnowledgeGraphService.ts';
+import { createGraphHandlers } from './GraphHandlers.ts';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -29,6 +31,7 @@ let disposePhase0: (() => void) | undefined;
 export let shadowWorkspaceManager: ShadowWorkspaceManager;
 export let graphActivity: GraphActivity;
 export let settingsService: SettingsService;
+export let knowledgeGraphService: KnowledgeGraphService;
 let graphEventBridge: GraphEventBridge | undefined;
 let disposeCredentials: (() => void) | undefined;
 
@@ -48,9 +51,11 @@ function registerIPC(): void {
     agentStatusBridge?.update({ agent_id: agent, connection_status: status.connection_status,
       worker_model_name: status.worker_model_name, keychain_configured: null });
   });
+  knowledgeGraphService = new KnowledgeGraphService(shadowWorkspaceManager);
   disposePhase0 = registerPhase0Handlers(ipcMain, () => mainWindow?.webContents ?? null,
     { ...createWorkspaceHandlers(shadowWorkspaceManager, () => mainWindow?.webContents ?? null),
-      ...createSettingsHandlers(settingsService, new SystemSettingsService(app.getPath('userData'), app.getVersion())) });
+      ...createSettingsHandlers(settingsService, new SystemSettingsService(app.getPath('userData'), app.getVersion())),
+      ...createGraphHandlers(knowledgeGraphService, () => mainWindow?.webContents ?? null) });
   disposeCredentials = registerSettingsCredentials(ipcMain, () => mainWindow?.webContents ?? null, settingsService);
   officeBridge = new VisualOfficeBridge(dagExecutor, ipcMain, () => mainWindow?.webContents ?? null);
   ipcMain.handle(IPC.getStorage, (event) => {
@@ -105,4 +110,4 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('will-quit', () => { disposeCredentials?.(); disposePhase0?.(); graphEventBridge?.dispose(); shadowWorkspaceManager?.dispose(); officeBridge?.dispose(); agentStatusBridge?.dispose(); ipcMain.removeHandler(IPC.getStorage); });
+app.on('will-quit', () => { disposeCredentials?.(); disposePhase0?.(); graphEventBridge?.dispose(); knowledgeGraphService?.dispose(); shadowWorkspaceManager?.dispose(); officeBridge?.dispose(); agentStatusBridge?.dispose(); ipcMain.removeHandler(IPC.getStorage); });

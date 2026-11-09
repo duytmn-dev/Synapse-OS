@@ -75,19 +75,48 @@
 
 ## PHA 2: TÍCH HỢP GRAPHIFY CLI & BẢN ĐỒ KNOWLEDGE GRAPH TƯƠNG TÁC (CHẠY SONG SONG)
 **Nhánh FRONTEND (Antigravity - Model: Claude Opus 5.5 Medium):**
-- [ ] Dựng khung `Codebase Knowledge Graph` ở nửa trên cột phải theo đúng `docs/design/01 Dashboard.svg` và `docs/design/Graph Nodes & Flow.svg`:
+- [x] Dựng khung `Codebase Knowledge Graph` ở nửa trên cột phải theo đúng `docs/design/01 Dashboard.svg` và `docs/design/Graph Nodes & Flow.svg`:
   - Nền lưới grid tối màu, badge góc trái `9 NODES / 10 EDGES`, badge góc phải `• ĐANG CHẠY`, cụm 4 nút điều khiển góc phải (`Tìm kiếm 🔍`, `Zoom In +`, `Zoom Out -`, `Fit View ⛶`), chú thích đáy (`• ChatGPT`, `• Gemini`, `• Bỏ qua`, `• Lỗi`, `Cuộn để zoom`).
-- [ ] Dựng 3 thành phần tương tác trên Đồ thị bám sát thiết kế SVG:
+- [x] Dựng 3 thành phần tương tác trên Đồ thị bám sát thiết kế SVG:
   1. **Hover Tooltip (`docs/design/04 Hover Node.svg`):** Kính mờ hiển thị icon file, tên file (`pipeline.py`), số hàm & liên kết (`5 hàm · 5 liên kết`), thời gian sửa (`Thay đổi 2 phút trước`).
   2. **Context Menu (`docs/design/05 Context Menu.svg`):** Click chuột phải vào Node hiện popup viền xanh neon gồm 2 nút `[Tập trung (Focus)]` và `[Bỏ qua (Exclude)]`.
   3. **Search Overlay (`docs/design/06 Tìm kiếm file.svg`):** Bấm nút kính lúp hiện ô tìm kiếm (`pipeline`) và danh sách kết quả (`pipeline.py · 1 kết quả`), click vào tự động pan/zoom tới Node đó.
-- [ ] **TEST PHA 2 (FE):** Test nạp dữ liệu đồ thị mẫu, kiểm tra đầy đủ các trạng thái Node (Mặc định, ChatGPT, Gemini, Bỏ qua, Lỗi), Hover, Right-click, Search và Zoom/Pan.
+- [x] **TEST PHA 2 (FE):** Test nạp dữ liệu đồ thị mẫu, kiểm tra đầy đủ các trạng thái Node (Mặc định, ChatGPT, Gemini, Bỏ qua, Lỗi), Hover, Right-click, Search và Zoom/Pan.
+
+**Ghi chú PHA 2 (FE — 09/11/2026):**
+- Đã hoàn thành 100% các thành phần đồ thị tương tác trong `src/ui/graph/KnowledgeGraphPanel.tsx`:
+  - **Hover Tooltip:** Hiển thị mượt mà card kính mờ $218 \times 90\text{ px}$ với icon file, tên file, số hàm · số liên kết, thời gian sửa file tương đối khi di chuột qua bất kỳ Node nào; tự động neo tọa độ và giới hạn trong khung chứa (không bị tràn viền).
+  - **Context Menu:** Bắt sự kiện chuột phải (`onContextMenu`) trên từng Node, mở popup kính mờ viền neon `#58E9A8` với 2 thao tác chuẩn contract `GraphNodeControlCommand`:
+    - `[Tập trung (Focus)]`: Kích hoạt chế độ Focus làm sáng Node + các liên kết trực tiếp, đồng thời làm mờ (dimmed opacity 0.22) các Node/Edge không liên quan; click lại để bỏ tập trung (`RESET`).
+    - `[Bỏ qua (Exclude)]`: Đổi trạng thái Node sang `IGNORED` (màu xám mờ `#65748A`), hỗ trợ nút `Khôi phục (Reset)` để đưa Node về trạng thái ban đầu.
+    - Context Menu tự đóng khi click ra ngoài canvas hoặc click nút lệnh.
+  - **Search Overlay & Pan/Zoom:** Bấm icon Search góc phải để mở overlay tìm kiếm theo đúng `06 Tìm kiếm file.svg` (viền `#58E9A8`, danh sách kết quả real-time). Khi click vào một kết quả, tự động Pan (dịch tâm) và Zoom (phóng to) tới vị trí Node mục tiêu với hiệu ứng highlight ping phát sáng.
+  - **Tương tác Canvas:** Hỗ trợ kéo chuột để Pan (Drag-to-pan), cuộn chuột để Zoom (Wheel-to-zoom), và 4 nút thanh công cụ (Tìm kiếm, Phóng to, Thu nhỏ, Căn giữa toàn khung).
+  - **Đồng bộ IPC Bridge:** Đã tích hợp hàm `controlGraphNode(command)` vào `useSynapseBridge.ts` và truyền xuống từ `App.tsx`, đảm bảo hỗ trợ cả IPC thật lẫn optimistic UI update ngay lập tức.
+- Chi tiết bàn giao kiến trúc và API đã được tạo tại `docs/PHASE_2_FRONTEND_HANDOVER.md`.
+- `npx tsc --noEmit`: **PASS 0 lỗi**.
+- `npm run build`: **PASS 0 lỗi** (Tạo sạch bundle renderer, preload, main).
+- Backend & Contract tests: **84 PASS, 0 FAIL, 1 SKIP** (toàn bộ 85 bài kiểm thử giữ nguyên trạng thái xanh sạch).
 
 **Nhánh BACKEND (Codex - Model: GPT-6.1 Terra & Sol):**
-- [ ] Viết `GraphifyRunner` (`src/adapters/graphify/GraphifyRunner.ts`): Gọi CLI `graphify` qua `child_process` (dùng `tree-sitter` AST local, $0 API). Ép toàn bộ output (`graph.json`) xuất thẳng vào thư mục Shadow Workspace trong `%APPDATA%`.
-- [ ] Viết parser đọc `graph.json`, kết hợp với bảng `graph_overrides` (trạng thái Focus/Exclude, số hàm, mtime của file thật) để chuẩn hóa thành `GraphData` bắn xuống IPC.
-- [ ] Cài đặt `FileWatcher` (chokidar) theo dõi thư mục dự án: Khi có file code thay đổi, chỉ quét cập nhật cục bộ (Delta Update) và phát sự kiện `graph_data_update` xuống Frontend.
-- [ ] **TEST PHA 2 (BE):** Chạy `GraphifyRunner` trên chính thư mục mã nguồn của dự án: xác nhận xuất ra `GraphData` thật có đầy đủ Nodes/Edges, thời gian sửa file chính xác, và thư mục gốc hoàn toàn sạch sẽ.
+- [x] Viết `GraphifyRunner` (`src/adapters/graphify/GraphifyRunner.ts`): Gọi CLI `graphify` qua `child_process` (dùng `tree-sitter` AST local, $0 API). Ép toàn bộ output (`graph.json`) xuất thẳng vào thư mục Shadow Workspace trong `%APPDATA%`.
+- [x] Viết parser đọc `graph.json`, kết hợp với bảng `graph_overrides` (trạng thái Focus/Exclude, số hàm, mtime của file thật) để chuẩn hóa thành `GraphData` bắn xuống IPC.
+- [x] Cài đặt `FileWatcher` (chokidar) theo dõi thư mục dự án: Khi có file code thay đổi, chỉ quét cập nhật cục bộ (Delta Update) và phát sự kiện `graph_data_update` xuống Frontend.
+- [x] **TEST PHA 2 (BE):** Chạy `GraphifyRunner` trên chính thư mục mã nguồn của dự án: xác nhận xuất ra `GraphData` thật có đầy đủ Nodes/Edges, thời gian sửa file chính xác, và thư mục gốc hoàn toàn sạch sẽ.
+
+**Ghi chú PHA 2 (BE — 09/11/2026):**
+- Đã hoàn thành 100% các thành phần lõi Backend phục vụ Codebase Knowledge Graph:
+  - **`GraphifyRunner` (`src/adapters/graphify/GraphifyRunner.ts`):** Thực thi CLI `graphify` qua `child_process.execFile` và bộ phân tích AST local parsing tĩnh ($0 API cost). Ép xuất `graph.json` trực tiếp vào `%APPDATA%/SynapseOS/projects/<project_hash>/graph.json`. Chặn tuyệt đối hành vi ghi vào thư mục nguồn (`PROJECT_POLLUTION_BLOCKED`).
+  - **`KnowledgeGraphService` (`src/adapters/graphify/KnowledgeGraphService.ts`):** 
+    - Làm giàu dữ liệu đồ thị: Kết hợp `graph.json` với `fs.stat` đo `mtimeMs` thực tế của từng file trên ổ đĩa, trích xuất số hàm, tính toán bậc liên kết (`link_count`), và đọc bảng SQLite `graph_overrides`.
+    - Xử lý lệnh điều khiển Node (`GraphNodeControlCommand`): Cập nhật atomic vào SQLite bảng `graph_overrides` cho các lệnh `FOCUS` (lưu state FOCUSED), `EXCLUDE` (lưu state EXCLUDED -> visual state IGNORED), và `RESET` (xóa override).
+    - Cài đặt `chokidar` theo dõi các sự kiện `add`, `change`, `unlink` trên thư mục dự án; debounce 150ms để tự động cập nhật đồ thị cục bộ (Delta Update) và phát thông báo `graph_data_update`.
+  - **IPC Handlers (`src/main/GraphHandlers.ts`):** Đã kết nối 2 IPC channels `synapse:graph:get` và `synapse:graph:control` vào `KnowledgeGraphService`, xác thực sender bảo mật, phát sóng snapshot qua kênh `graph_data_update`.
+- Kết quả kiểm tra:
+  - `tests/backend/graphify.test.ts`: **7/7 PASS**, bao gồm bài test chạy `GraphifyRunner` trên chính thư mục mã nguồn hiện tại của dự án: trích xuất hơn 10 file/hàm thực tế, thời gian mtime chính xác và thư mục gốc giữ nguyên trạng thái sạch sẽ 100%.
+  - `npx tsc --noEmit`: **PASS 0 lỗi**.
+  - `npm run build`: **PASS 0 lỗi**.
+  - Toàn bộ test suite dự án: **91 PASS, 0 FAIL, 1 SKIP** (92 bài kiểm thử).
 
 ---
 

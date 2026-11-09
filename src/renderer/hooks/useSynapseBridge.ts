@@ -9,6 +9,7 @@ import type {
   DAGTaskItem,
   GraphActiveEvent,
   GraphData,
+  GraphNodeControlCommand,
   ToolDependencyStatus,
   UpdateStatus,
   VisualOfficeEvent,
@@ -355,6 +356,43 @@ export function useSynapseBridge() {
     [bridge, state.toolDependencies]
   );
 
+  const controlGraphNode = useCallback(
+    async (command: GraphNodeControlCommand): Promise<void> => {
+      if (bridge?.controlGraphNode) {
+        try {
+          await bridge.controlGraphNode(command);
+        } catch (err) {
+          console.warn('[useSynapseBridge] controlGraphNode IPC returned error (optimistic fallback applied):', err);
+        }
+      }
+      // Optimistic local update when backend is offline or during standalone rendering
+      setState((s) => {
+        if (!s.graphData) return s;
+        const nodes = s.graphData.nodes.map((n) => {
+          if (n.id !== command.node_id) return n;
+          if (command.command === 'FOCUS') {
+            return { ...n, is_focused: true };
+          }
+          if (command.command === 'EXCLUDE') {
+            return { ...n, visual_state: 'IGNORED' as const, is_focused: false };
+          }
+          if (command.command === 'RESET') {
+            return { ...n, is_focused: false, visual_state: 'DEFAULT' as const };
+          }
+          return n;
+        });
+        return {
+          ...s,
+          graphData: {
+            ...s.graphData,
+            nodes,
+          },
+        };
+      });
+    },
+    [bridge]
+  );
+
   return {
     ...state,
     agentConnectionAction,
@@ -364,5 +402,6 @@ export function useSynapseBridge() {
     setDefaultChatAgent,
     saveAppearanceSettings,
     ensureToolDependency,
+    controlGraphNode,
   };
 }

@@ -35,6 +35,7 @@ export default function App() {
     setDefaultChatAgent,
     saveAppearanceSettings,
     ensureToolDependency,
+    controlGraphNode,
   } = useSynapseBridge();
 
   const [mode, setMode] = useState<ViewMode>('graph');
@@ -161,6 +162,8 @@ export default function App() {
                 isRunning={true}
                 activeEvent={graphActiveEvent}
                 graphData={graphData}
+                projectHash={graphData?.project_hash || 'video-360-highlights'}
+                onControlNode={controlGraphNode}
               />
             </div>
             <div className="h-[45%] min-h-0">
