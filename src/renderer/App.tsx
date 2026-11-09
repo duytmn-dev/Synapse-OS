@@ -1,9 +1,5 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSynapseBridge } from './hooks/useSynapseBridge';
-import {
-  DEMO_CONVERSATIONS,
-  DEMO_MESSAGES,
-} from './mock/demoData';
 import type { ChatMessage, Conversation, TargetAgent, ViewMode } from '../ui/chat/types';
 import { getAgentMeta } from '../ui/agents';
 import { TopBar } from '../ui/layout/TopBar';
@@ -23,11 +19,17 @@ export default function App() {
     live,
     graphActiveEvent,
     graphData,
+    shadowProjects,
+    chatSessions,
+    activeProjectHash,
     networkSettings,
     appearanceSettings,
     toolDependencies,
     workspaceStorage,
     updateStatus,
+    selectProject,
+    openShadowProject,
+    mutateChatSession,
     agentConnectionAction,
     setFallbackOnError,
     setAgentAlertThreshold,
@@ -39,11 +41,9 @@ export default function App() {
   } = useSynapseBridge();
 
   const [mode, setMode] = useState<ViewMode>('graph');
-  const [conversations, setConversations] = useState<Conversation[]>(DEMO_CONVERSATIONS);
-  const [activeId, setActiveId] = useState(DEMO_CONVERSATIONS[0].id);
-  const [threads, setThreads] = useState<Record<string, ChatMessage[]>>({
-    [DEMO_CONVERSATIONS[0].id]: DEMO_MESSAGES,
-  });
+  const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
+  const [activeId, setActiveId] = useState<string>('');
+  const [threads, setThreads] = useState<Record<string, ChatMessage[]>>({});
   const [highlight, setHighlight] = useState<string | null>(null);
 
   // Chat Popover & Modal state (07 Quản lý chat.svg)
@@ -54,15 +54,57 @@ export default function App() {
   // Settings State (02 & 03 Cài đặt.svg)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  const active = conversations.find((c) => c.id === activeId) ?? conversations[0];
-  const messages = threads[activeId] ?? [];
+  // Đồng bộ danh sách hội thoại từ SQLite chatSessions thật
+  const conversations: Conversation[] = useMemo(() => {
+    if (chatSessions && chatSessions.length > 0) {
+      return chatSessions.map((s) => ({
+        id: s.session_id,
+        title: s.title,
+        isPinned: s.is_pinned,
+        projectHash: s.project_hash,
+        updatedAt: s.updated_at,
+      }));
+    }
+    return localConversations;
+  }, [chatSessions, localConversations]);
+
+  // Cập nhật activeId khi danh sách conversations thay đổi
+  useEffect(() => {
+    if (conversations.length > 0) {
+      const exists = conversations.some((c) => c.id === activeId);
+      if (!exists || !activeId) {
+        setActiveId(conversations[0].id);
+      }
+    } else {
+      setActiveId('');
+    }
+  }, [conversations, activeId]);
+
+  const active = conversations.find((c) => c.id === activeId) ?? {
+    id: 'empty',
+    title: 'Cuộc trò chuyện mới',
+  };
+
+  const currentProject = shadowProjects.find((p) => p.project_hash === activeProjectHash);
+  const projectTitle = currentProject?.project_name ?? (graphData?.project_hash ? 'Synapse OS' : 'Chưa mở dự án');
+
+  const messages = threads[activeId] ?? [
+    {
+      id: 'welcome',
+      author: 'system',
+      authorName: 'AGENT HQ',
+      time: now(),
+      text: 'Chào mừng bạn đến với Synapse OS. Hãy nhập yêu cầu để Triage Router điều phối các Agent xử lý.',
+    },
+  ];
 
   const handleSend = useCallback(
     (text: string, target: TargetAgent, files: File[]) => {
+      const currentActiveId = activeId || 'default';
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         author: 'user',
-        authorName: 'Justin',
+        authorName: 'Bạn',
         time: now(),
         text,
         attachments: files.map((f) => ({
@@ -81,54 +123,92 @@ export default function App() {
             ? 'Đã nhận yêu cầu. Triage Router sẽ phân loại Fast-Path / DAG-Path.'
             : `Đã chuyển yêu cầu tới @${getAgentMeta(target).label}.`,
       };
-      setThreads((t) => ({ ...t, [activeId]: [...(t[activeId] ?? []), userMsg, ack] }));
+      setThreads((t) => ({ ...t, [currentActiveId]: [...(t[currentActiveId] ?? []), userMsg, ack] }));
     },
     [activeId],
   );
 
-  const newConversation = () => {
-    const c: Conversation = {
-      id: crypto.randomUUID(),
-      title: `Cuộc trò chuyện ${conversations.length + 1}`,
-      updatedAt: Date.now(),
-    };
-    setConversations([c, ...conversations]);
-    setActiveId(c.id);
+  const newConversation = async () => {
+    if (activeProjectHash) {
+      const updated = await mutateChatSession({
+        action: 'CREATE',
+        project_hash: activeProjectHash,
+        new_title: `Cuộc trò chuyện ${conversations.length + 1}`,
+      });
+      if (updated.length > 0) {
+        setActiveId(updated[0].session_id);
+      }
+    } else {
+      const c: Conversation = {
+        id: crypto.randomUUID(),
+        title: `Cuộc trò chuyện ${conversations.length + 1}`,
+        updatedAt: Date.now(),
+      };
+      setLocalConversations((prev) => [c, ...prev]);
+      setActiveId(c.id);
+    }
   };
 
-  const handleTogglePin = (id: string) => {
-    setConversations((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, isPinned: !c.isPinned } : c)),
-    );
+  const handleTogglePin = async (id: string) => {
+    if (activeProjectHash) {
+      await mutateChatSession({
+        action: 'TOGGLE_PIN',
+        project_hash: activeProjectHash,
+        session_id: id,
+      });
+    } else {
+      setLocalConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, isPinned: !c.isPinned } : c)),
+      );
+    }
     setMenuTarget(null);
   };
 
-  const handleConfirmRename = (id: string, newTitle: string) => {
-    setConversations((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c)),
-    );
+  const handleConfirmRename = async (id: string, newTitle: string) => {
+    if (activeProjectHash) {
+      await mutateChatSession({
+        action: 'RENAME',
+        project_hash: activeProjectHash,
+        session_id: id,
+        new_title: newTitle,
+      });
+    } else {
+      setLocalConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c)),
+      );
+    }
     setRenameTarget(null);
   };
 
-  const handleConfirmDelete = (id: string) => {
-    setConversations((prev) => {
-      const filtered = prev.filter((c) => c.id !== id);
-      if (activeId === id && filtered.length > 0) {
-        setActiveId(filtered[0].id);
-      }
-      return filtered;
-    });
+  const handleConfirmDelete = async (id: string) => {
+    if (activeProjectHash) {
+      await mutateChatSession({
+        action: 'DELETE',
+        project_hash: activeProjectHash,
+        session_id: id,
+      });
+    } else {
+      setLocalConversations((prev) => prev.filter((c) => c.id !== id));
+    }
     setDeleteTarget(null);
+  };
+
+  const handleOpenProjectFolder = async () => {
+    const inputPath = window.prompt('Nhập đường dẫn thư mục dự án cần mở:');
+    if (inputPath && inputPath.trim()) {
+      await openShadowProject(inputPath.trim());
+    }
   };
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#080E18] text-[#EAF2FF] p-3 gap-3 bg-grid-dashboard font-sans">
       {/* TopBar Header */}
       <TopBar
-        projectTitle="Video 360 Highlights"
+        projectTitle={projectTitle}
         mode={mode}
         onModeChange={setMode}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onSelectProject={handleOpenProjectFolder}
       />
 
       {/* Main 3-Column Layout */}
@@ -142,12 +222,16 @@ export default function App() {
           quota={quota}
           live={live}
           onOpenChatMenu={(target) => setMenuTarget(target)}
+          projects={shadowProjects}
+          activeProjectHash={activeProjectHash}
+          onSelectProject={selectProject}
+          onOpenProject={handleOpenProjectFolder}
         />
 
         {/* Center Column: Chat & Preview */}
         <ChatPanel
           title={active.title}
-          projectPathSubtitle="Video 360 Highlights / Chat dự án"
+          projectPathSubtitle={`${projectTitle} / Chat dự án`}
           messages={messages}
           connectedAgents={quota}
           onSend={handleSend}
@@ -162,13 +246,13 @@ export default function App() {
                 isRunning={true}
                 activeEvent={graphActiveEvent}
                 graphData={graphData}
-                projectHash={graphData?.project_hash || 'video-360-highlights'}
+                projectHash={activeProjectHash || 'default'}
                 onControlNode={controlGraphNode}
               />
             </div>
             <div className="h-[45%] min-h-0">
               <TaskTree
-                projectTitle="Tool cắt video 360"
+                projectTitle={projectTitle}
                 tasks={tasks}
                 highlightCode={highlight}
                 onHover={setHighlight}

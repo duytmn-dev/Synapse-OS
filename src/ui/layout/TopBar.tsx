@@ -21,6 +21,7 @@ export function TopBar({
   mode,
   onModeChange,
   onOpenSettings,
+  onSelectProject,
 }: TopBarProps) {
   return (
     <header className="relative flex h-[52px] w-full shrink-0 items-center justify-between rounded-[16px] border border-[#23344A] bg-[#0E1725] px-4 shadow-lg">
@@ -36,6 +37,8 @@ export function TopBar({
         <div className="mx-2 h-5 w-[1px] bg-[#23344A]" />
 
         <button
+          type="button"
+          onClick={onSelectProject}
           className="flex items-center gap-2 rounded-md px-2 py-1 text-[13px] font-medium text-[#9DB0C8] transition hover:bg-[#142235] hover:text-[#EAF2FF]"
           title="Chọn dự án hiện tại"
         >

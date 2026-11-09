@@ -10,15 +10,13 @@ interface AgentDisplayConfig {
   id: string;
   name: string;
   color: string;
-  default5h: number;
-  defaultWeek: number;
 }
 
 const AGENTS: AgentDisplayConfig[] = [
-  { id: 'chatgpt', name: 'ChatGPT', color: '#58E9A8', default5h: 40, defaultWeek: 28 },
-  { id: 'gemini', name: 'Gemini', color: '#A88BFA', default5h: 25, defaultWeek: 18 },
-  { id: 'codex', name: 'Codex', color: '#78BAFF', default5h: 70, defaultWeek: 45 },
-  { id: 'claude', name: 'Claude', color: '#FFC075', default5h: 90, defaultWeek: 65 },
+  { id: 'chatgpt', name: 'ChatGPT', color: '#58E9A8' },
+  { id: 'gemini', name: 'Gemini', color: '#A88BFA' },
+  { id: 'codex', name: 'Codex', color: '#78BAFF' },
+  { id: 'claude', name: 'Claude', color: '#FFC075' },
 ];
 
 export function QuotaPanel({ quota, live = false }: QuotaPanelProps) {
@@ -44,8 +42,9 @@ export function QuotaPanel({ quota, live = false }: QuotaPanelProps) {
           const stat = quota.find(
             (q) => q.agent_id.toLowerCase() === cfg.id || (cfg.id === 'gemini' && q.agent_id.toLowerCase().includes('gemini'))
           );
-          const p5h = stat?.usage_5h_percent ?? cfg.default5h;
-          const pWeek = stat?.usage_week_percent ?? cfg.defaultWeek;
+          const hasData = stat !== undefined && (stat.usage_5h_percent > 0 || stat.usage_week_percent > 0);
+          const p5h = stat?.usage_5h_percent ?? 0;
+          const pWeek = stat?.usage_week_percent ?? 0;
           const isWarning = p5h >= 80;
 
           return (
@@ -65,7 +64,7 @@ export function QuotaPanel({ quota, live = false }: QuotaPanelProps) {
                     isWarning ? 'text-[#FFC075]' : 'text-[#9DB0C8]'
                   }`}
                 >
-                  {p5h}% / {pWeek}%
+                  {hasData ? `${p5h}% / ${pWeek}%` : '--% / --%'}
                 </span>
               </div>
 
@@ -86,7 +85,7 @@ export function QuotaPanel({ quota, live = false }: QuotaPanelProps) {
 
       {/* Footer live status */}
       <span className="mt-1 text-[10.5px] text-[#8297B2]">
-        {live ? 'Đã kết nối IPC thời gian thực' : 'Số liệu minh họa'}
+        {live ? 'Đã kết nối IPC thời gian thực' : 'Chưa có kết nối IPC'}
       </span>
     </div>
   );

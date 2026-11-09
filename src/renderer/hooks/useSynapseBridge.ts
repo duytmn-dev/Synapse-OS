@@ -6,26 +6,18 @@ import type {
   AINetworkSettings,
   AppearanceAndGraphSettings,
   AppearanceSettings,
+  ChatSessionItem,
+  ChatSessionMutationRequest,
   DAGTaskItem,
   GraphActiveEvent,
   GraphData,
   GraphNodeControlCommand,
+  ShadowProjectMeta,
   ToolDependencyStatus,
   UpdateStatus,
   VisualOfficeEvent,
   WorkspaceStorageInfo,
 } from '@shared/types';
-import {
-  DEMO_ACTIVE_ROOMS,
-  DEMO_AI_NETWORK_SETTINGS,
-  DEMO_APPEARANCE_SETTINGS,
-  DEMO_OFFICE,
-  DEMO_QUOTA,
-  DEMO_TASKS,
-  DEMO_TOOL_DEPENDENCIES,
-  DEMO_UPDATE_STATUS,
-  DEMO_WORKSPACE_STORAGE,
-} from '@renderer/mock/demoData';
 
 export interface SynapseState {
   quota: AgentQuotaStat[];
@@ -34,18 +26,20 @@ export interface SynapseState {
   activeRooms: VisualOfficeEvent['room_id'][];
   graphData: GraphData | null;
   graphActiveEvent: GraphActiveEvent | null;
+  shadowProjects: ShadowProjectMeta[];
+  chatSessions: ChatSessionItem[];
+  activeProjectHash: string | null;
   networkSettings: AINetworkSettings;
   appearanceSettings: AppearanceSettings;
   toolDependencies: ToolDependencyStatus[];
   workspaceStorage: WorkspaceStorageInfo;
   updateStatus: UpdateStatus;
-  /** true = đang nhận dữ liệu thật từ IPC Bridge; false = dữ liệu minh hoạ. */
+  /** true = đang nhận dữ liệu thật từ IPC Bridge; false = offline/chưa kết nối IPC. */
   live: boolean;
 }
 
 const officeKey = (e: Pick<VisualOfficeEvent, 'room_id' | 'desk_index'>) => `${e.room_id}#${e.desk_index}`;
 
-/** Gộp 1 sự kiện VisualOfficeEvent vào danh sách hiện tại (theo room_id + desk_index). */
 export function mergeOfficeEvent(list: VisualOfficeEvent[], ev: VisualOfficeEvent): VisualOfficeEvent[] {
   const key = officeKey(ev);
   const idx = list.findIndex((e) => officeKey(e) === key);
@@ -56,24 +50,99 @@ export function mergeOfficeEvent(list: VisualOfficeEvent[], ev: VisualOfficeEven
 }
 
 export function getBridge() {
-  // window.synapse chỉ tồn tại khi chạy trong Electron (preload contextBridge).
   return typeof window !== 'undefined' && window.synapse ? window.synapse : undefined;
 }
+
+const INITIAL_QUOTA: AgentQuotaStat[] = [
+  { agent_id: 'chatgpt', usage_5h_percent: 0, usage_week_percent: 0 },
+  { agent_id: 'codex', usage_5h_percent: 0, usage_week_percent: 0 },
+  { agent_id: 'gemini', usage_5h_percent: 0, usage_week_percent: 0 },
+  { agent_id: 'claude', usage_5h_percent: 0, usage_week_percent: 0 },
+];
+
+const INITIAL_NETWORK_SETTINGS: AINetworkSettings = {
+  default_chat_agent_id: 'auto',
+  agents: [
+    {
+      agent_id: 'chatgpt',
+      display_name: 'ChatGPT',
+      role_description: 'Fast-Path triage và xử lý văn bản',
+      connection_status: 'DISCONNECTED',
+      auth_method: 'OAuth',
+      quota_5h_percent: 0,
+      quota_week_percent: 0,
+      fallback_api: { is_configured: false, use_fallback_on_error: false, is_valid: false },
+    },
+    {
+      agent_id: 'gemini',
+      display_name: 'Gemini',
+      role_description: 'Đa phương thức và xử lý video/âm thanh',
+      connection_status: 'DISCONNECTED',
+      auth_method: 'API Key',
+      quota_5h_percent: 0,
+      quota_week_percent: 0,
+      fallback_api: { is_configured: false, use_fallback_on_error: false, is_valid: false },
+    },
+    {
+      agent_id: 'codex',
+      display_name: 'Codex',
+      role_description: 'Thực thi mã nguồn và DAG pipelines',
+      connection_status: 'DISCONNECTED',
+      auth_method: 'OAuth',
+      quota_5h_percent: 0,
+      quota_week_percent: 0,
+      fallback_api: { is_configured: false, use_fallback_on_error: false, is_valid: false },
+    },
+    {
+      agent_id: 'claude',
+      display_name: 'Claude',
+      role_description: 'Kiểm toán và tái cấu trúc hệ thống',
+      connection_status: 'DISCONNECTED',
+      auth_method: 'API Key',
+      quota_5h_percent: 0,
+      quota_week_percent: 0,
+      fallback_api: { is_configured: false, use_fallback_on_error: false, is_valid: false },
+    },
+  ],
+};
+
+const INITIAL_APPEARANCE_SETTINGS: AppearanceSettings = {
+  startup_behavior: 'RESTORE_SESSION',
+  graph_render_fps: 'HIGH_60FPS',
+  enable_graph_glow: true,
+  enable_path_lights_up: true,
+  enable_task_sound: false,
+};
+
+const INITIAL_WORKSPACE_STORAGE: WorkspaceStorageInfo = {
+  total_used_mb: 0,
+  core_app_mb: 0,
+  temp_files_mb: 0,
+  shadow_workspaces_mb: 0,
+};
+
+const INITIAL_UPDATE_STATUS: UpdateStatus = {
+  current_version: '0.0.1',
+  has_dev_build_ready: false,
+};
 
 export function useSynapseBridge() {
   const bridge = getBridge();
   const [state, setState] = useState<SynapseState>({
-    quota: DEMO_QUOTA,
-    tasks: DEMO_TASKS,
-    office: DEMO_OFFICE,
-    activeRooms: DEMO_ACTIVE_ROOMS,
+    quota: INITIAL_QUOTA,
+    tasks: [],
+    office: [],
+    activeRooms: [],
     graphData: null,
     graphActiveEvent: null,
-    networkSettings: DEMO_AI_NETWORK_SETTINGS,
-    appearanceSettings: DEMO_APPEARANCE_SETTINGS,
-    toolDependencies: DEMO_TOOL_DEPENDENCIES,
-    workspaceStorage: DEMO_WORKSPACE_STORAGE,
-    updateStatus: DEMO_UPDATE_STATUS,
+    shadowProjects: [],
+    chatSessions: [],
+    activeProjectHash: null,
+    networkSettings: INITIAL_NETWORK_SETTINGS,
+    appearanceSettings: INITIAL_APPEARANCE_SETTINGS,
+    toolDependencies: [],
+    workspaceStorage: INITIAL_WORKSPACE_STORAGE,
+    updateStatus: INITIAL_UPDATE_STATUS,
     live: false,
   });
 
@@ -81,41 +150,72 @@ export function useSynapseBridge() {
     if (!bridge) return;
     let disposed = false;
 
-    // Lấy dữ liệu ban đầu từ IPC
-    Promise.all([
-      bridge.getQuota().catch(() => DEMO_QUOTA),
-      bridge.getTasks().catch(() => DEMO_TASKS),
-      bridge.getOffice().catch(() => DEMO_OFFICE),
-      bridge.getActiveRooms ? bridge.getActiveRooms().catch(() => null) : Promise.resolve(null),
-      bridge.getAINetworkSettings ? bridge.getAINetworkSettings().catch(() => DEMO_AI_NETWORK_SETTINGS) : Promise.resolve(DEMO_AI_NETWORK_SETTINGS),
-      bridge.getAppearanceSettings ? bridge.getAppearanceSettings().catch(() => DEMO_APPEARANCE_SETTINGS) : Promise.resolve(DEMO_APPEARANCE_SETTINGS),
-      bridge.getToolDependencies ? bridge.getToolDependencies().catch(() => DEMO_TOOL_DEPENDENCIES) : Promise.resolve(DEMO_TOOL_DEPENDENCIES),
-      bridge.getUpdateStatus ? bridge.getUpdateStatus().catch(() => DEMO_UPDATE_STATUS) : Promise.resolve(DEMO_UPDATE_STATUS),
-      bridge.getWorkspaceStorage ? bridge.getWorkspaceStorage().catch(() => DEMO_WORKSPACE_STORAGE) : Promise.resolve(DEMO_WORKSPACE_STORAGE),
-      bridge.getGraphData ? bridge.getGraphData('default').catch(() => null) : Promise.resolve(null),
-    ])
-      .then(([quota, tasks, office, activeRoomsSnap, network, appearance, tools, updates, storage, graph]) => {
+    // Lấy danh sách Shadow Projects và dữ liệu ban đầu
+    const initBridge = async () => {
+      try {
+        let projects: ShadowProjectMeta[] = [];
+        if (bridge.getShadowProjects) {
+          try {
+            projects = await bridge.getShadowProjects();
+          } catch (e) {
+            console.warn('[synapse] getShadowProjects warning:', e);
+          }
+        }
+
+        // Nếu chưa có project nào mở, tự động mở thư mục hiện tại
+        let currentHash: string | null = projects.length > 0 ? projects[0].project_hash : null;
+        if (!currentHash && bridge.openShadowProject) {
+          try {
+            const opened = await bridge.openShadowProject('.');
+            if (opened) {
+              projects = [opened];
+              currentHash = opened.project_hash;
+            }
+          } catch (e) {
+            console.warn('[synapse] openShadowProject(.) warning:', e);
+          }
+        }
+
+        const [quotaSnap, tasksSnap, officeSnap, activeRoomsSnap, networkSnap, appearanceSnap, toolsSnap, updatesSnap, storageSnap, sessionsSnap, graphSnap] =
+          await Promise.all([
+            bridge.getQuota ? bridge.getQuota().catch(() => []) : Promise.resolve([]),
+            bridge.getTasks ? bridge.getTasks().catch(() => []) : Promise.resolve([]),
+            bridge.getOffice ? bridge.getOffice().catch(() => []) : Promise.resolve([]),
+            bridge.getActiveRooms ? bridge.getActiveRooms().catch(() => null) : Promise.resolve(null),
+            bridge.getAINetworkSettings ? bridge.getAINetworkSettings().catch(() => null) : Promise.resolve(null),
+            bridge.getAppearanceSettings ? bridge.getAppearanceSettings().catch(() => null) : Promise.resolve(null),
+            bridge.getToolDependencies ? bridge.getToolDependencies().catch(() => []) : Promise.resolve([]),
+            bridge.getUpdateStatus ? bridge.getUpdateStatus().catch(() => null) : Promise.resolve(null),
+            bridge.getWorkspaceStorage ? bridge.getWorkspaceStorage().catch(() => null) : Promise.resolve(null),
+            currentHash && bridge.getChatSessions ? bridge.getChatSessions(currentHash).catch(() => []) : Promise.resolve([]),
+            currentHash && bridge.getGraphData ? bridge.getGraphData(currentHash).catch(() => null) : Promise.resolve(null),
+          ]);
+
         if (!disposed) {
           setState((prev) => ({
             ...prev,
-            quota: quota && quota.length > 0 ? quota : prev.quota,
-            tasks: tasks && tasks.length > 0 ? tasks : prev.tasks,
-            office: office && office.length > 0 ? office : prev.office,
-            activeRooms:
-              activeRoomsSnap && activeRoomsSnap.active_rooms && activeRoomsSnap.active_rooms.length > 0
-                ? activeRoomsSnap.active_rooms
-                : prev.activeRooms,
-            networkSettings: network ?? prev.networkSettings,
-            appearanceSettings: (appearance as AppearanceSettings) ?? prev.appearanceSettings,
-            toolDependencies: tools ?? prev.toolDependencies,
-            updateStatus: updates ?? prev.updateStatus,
-            workspaceStorage: storage ?? prev.workspaceStorage,
-            graphData: graph ?? prev.graphData,
+            quota: quotaSnap && quotaSnap.length > 0 ? quotaSnap : prev.quota,
+            tasks: tasksSnap ?? prev.tasks,
+            office: officeSnap ?? prev.office,
+            activeRooms: activeRoomsSnap?.active_rooms ?? prev.activeRooms,
+            shadowProjects: projects,
+            activeProjectHash: currentHash ?? prev.activeProjectHash,
+            chatSessions: sessionsSnap ?? prev.chatSessions,
+            graphData: graphSnap ?? prev.graphData,
+            networkSettings: networkSnap ?? prev.networkSettings,
+            appearanceSettings: (appearanceSnap as AppearanceSettings) ?? prev.appearanceSettings,
+            toolDependencies: toolsSnap && toolsSnap.length > 0 ? toolsSnap : prev.toolDependencies,
+            updateStatus: updatesSnap ?? prev.updateStatus,
+            workspaceStorage: storageSnap ?? prev.workspaceStorage,
             live: true,
           }));
         }
-      })
-      .catch((err) => console.error('[synapse] Không lấy được dữ liệu ban đầu từ IPC:', err));
+      } catch (err) {
+        console.error('[synapse] Khởi tạo dữ liệu từ IPC thất bại:', err);
+      }
+    };
+
+    void initBridge();
 
     const offs: (() => void)[] = [];
 
@@ -143,7 +243,6 @@ export function useSynapseBridge() {
         )
       );
     }
-    // Lắng nghe sự kiện GraphActiveEvent thời gian thực (Path lights up)
     if (bridge.onGraphActiveEvent) {
       offs.push(
         bridge.onGraphActiveEvent((ev) =>
@@ -166,12 +265,120 @@ export function useSynapseBridge() {
         )
       );
     }
+    if (bridge.onShadowProjectsUpdated) {
+      offs.push(
+        bridge.onShadowProjectsUpdated((projects) =>
+          setState((s) => ({
+            ...s,
+            shadowProjects: projects,
+            live: true,
+          }))
+        )
+      );
+    }
+    if (bridge.onChatSessionsUpdated) {
+      offs.push(
+        bridge.onChatSessionsUpdated((sessions) =>
+          setState((s) => ({
+            ...s,
+            chatSessions: sessions,
+            live: true,
+          }))
+        )
+      );
+    }
 
     return () => {
       disposed = true;
       offs.forEach((off) => off());
     };
   }, [bridge]);
+
+  // Chọn dự án hoạt động và nạp sessions & graph tương ứng
+  const selectProject = useCallback(
+    async (hash: string) => {
+      setState((s) => ({ ...s, activeProjectHash: hash }));
+      if (bridge?.getChatSessions) {
+        try {
+          const sessions = await bridge.getChatSessions(hash);
+          setState((s) => ({ ...s, chatSessions: sessions }));
+        } catch (e) {
+          console.warn('[useSynapseBridge] getChatSessions failed:', e);
+        }
+      }
+      if (bridge?.getGraphData) {
+        try {
+          const graph = await bridge.getGraphData(hash);
+          setState((s) => ({ ...s, graphData: graph }));
+        } catch (e) {
+          console.warn('[useSynapseBridge] getGraphData failed:', e);
+        }
+      }
+    },
+    [bridge]
+  );
+
+  const openShadowProject = useCallback(
+    async (projectPath: string): Promise<ShadowProjectMeta | null> => {
+      if (bridge?.openShadowProject) {
+        const meta = await bridge.openShadowProject(projectPath);
+        setState((s) => ({
+          ...s,
+          shadowProjects: [...s.shadowProjects.filter((p) => p.project_hash !== meta.project_hash), meta],
+          activeProjectHash: meta.project_hash,
+          chatSessions: meta.sessions,
+        }));
+        return meta;
+      }
+      return null;
+    },
+    [bridge]
+  );
+
+  const mutateChatSession = useCallback(
+    async (request: ChatSessionMutationRequest): Promise<ChatSessionItem[]> => {
+      if (bridge?.mutateChatSession) {
+        const updatedSessions = await bridge.mutateChatSession(request);
+        setState((s) => ({ ...s, chatSessions: updatedSessions }));
+        return updatedSessions;
+      }
+      // Fallback local state nếu chạy ngoài Electron
+      const current = [...state.chatSessions];
+      if (request.action === 'CREATE') {
+        const newItem: ChatSessionItem = {
+          session_id: crypto.randomUUID(),
+          project_hash: request.project_hash ?? 'local',
+          title: request.new_title ?? 'Cuộc trò chuyện mới',
+          is_pinned: false,
+          updated_at: Date.now(),
+        };
+        const next = [newItem, ...current];
+        setState((s) => ({ ...s, chatSessions: next }));
+        return next;
+      }
+      if (request.action === 'RENAME' && request.session_id) {
+        const next = current.map((c) =>
+          c.session_id === request.session_id ? { ...c, title: request.new_title ?? c.title, updated_at: Date.now() } : c
+        );
+        setState((s) => ({ ...s, chatSessions: next }));
+        return next;
+      }
+      if (request.action === 'TOGGLE_PIN' && request.session_id) {
+        const next = current.map((c) =>
+          c.session_id === request.session_id ? { ...c, is_pinned: !c.is_pinned, updated_at: Date.now() } : c
+        );
+        setState((s) => ({ ...s, chatSessions: next }));
+        return next;
+      }
+      if (request.action === 'DELETE' && request.session_id) {
+        const next = current.filter((c) => c.session_id !== request.session_id);
+        setState((s) => ({ ...s, chatSessions: next }));
+        return next;
+      }
+      return current;
+    },
+    [bridge, state.chatSessions]
+  );
 
   // Các action IPC thực thi gọi thẳng vào bridge
   const agentConnectionAction = useCallback(
@@ -187,7 +394,6 @@ export function useSynapseBridge() {
         }));
         return updated;
       }
-      // Fallback cho môi trường web
       const agent = state.networkSettings.agents.find((a) => a.agent_id === agentId);
       const nextStatus = action === 'DISCONNECT' ? 'DISCONNECTED' : 'CONNECTED';
       const fallbackProfile: AgentSettingsProfile = agent
@@ -198,8 +404,8 @@ export function useSynapseBridge() {
             role_description: '',
             connection_status: nextStatus as any,
             auth_method: 'OAuth',
-            quota_5h_percent: 50,
-            quota_week_percent: 30,
+            quota_5h_percent: 0,
+            quota_week_percent: 0,
             fallback_api: { is_configured: false, use_fallback_on_error: false, is_valid: false },
           };
       setState((s) => ({
@@ -362,10 +568,9 @@ export function useSynapseBridge() {
         try {
           await bridge.controlGraphNode(command);
         } catch (err) {
-          console.warn('[useSynapseBridge] controlGraphNode IPC returned error (optimistic fallback applied):', err);
+          console.warn('[useSynapseBridge] controlGraphNode IPC returned error:', err);
         }
       }
-      // Optimistic local update when backend is offline or during standalone rendering
       setState((s) => {
         if (!s.graphData) return s;
         const nodes = s.graphData.nodes.map((n) => {
@@ -395,6 +600,9 @@ export function useSynapseBridge() {
 
   return {
     ...state,
+    selectProject,
+    openShadowProject,
+    mutateChatSession,
     agentConnectionAction,
     setFallbackOnError,
     setAgentAlertThreshold,

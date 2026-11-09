@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { DAGTaskItem } from '@shared/types';
+import type { AgentId, DAGTaskItem } from '@shared/types';
 import { IconChevronDown, IconChevronRight, IconFolder, IconLayers } from '../icons';
 
 export function normalizeStatus(raw?: string): DAGTaskItem['status'] {
@@ -7,6 +7,36 @@ export function normalizeStatus(raw?: string): DAGTaskItem['status'] {
     return raw;
   }
   return 'WAITING';
+}
+
+function getAgentColor(agentId?: AgentId | string): string {
+  switch (agentId?.toLowerCase()) {
+    case 'chatgpt':
+      return '#58E9A8';
+    case 'gemini':
+      return '#A88BFA';
+    case 'codex':
+      return '#78BAFF';
+    case 'claude':
+      return '#FFC075';
+    default:
+      return '#78BAFF';
+  }
+}
+
+function getAgentLabel(agentId?: AgentId | string): string {
+  switch (agentId?.toLowerCase()) {
+    case 'chatgpt':
+      return 'ChatGPT';
+    case 'gemini':
+      return 'Gemini';
+    case 'codex':
+      return 'Codex';
+    case 'claude':
+      return 'Claude';
+    default:
+      return 'Agent';
+  }
 }
 
 interface TaskTreeProps {
@@ -17,15 +47,15 @@ interface TaskTreeProps {
 }
 
 export function TaskTree({
-  projectTitle = 'Tool cắt video 360',
-  tasks,
+  projectTitle = 'Video 360 Highlights',
+  tasks = [],
   highlightCode,
   onHover,
 }: TaskTreeProps) {
   const [isRootExpanded, setIsRootExpanded] = useState(true);
   const doneCount = tasks.filter((t) => t.status === 'COMPLETED').length;
-  const totalCount = tasks.length || 5;
-  const progressPercent = Math.round((doneCount / totalCount) * 100);
+  const totalCount = tasks.length;
+  const progressPercent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 
   return (
     <section className="flex h-full flex-col justify-between rounded-[16px] border border-[#23344A] bg-[#0E1725] p-4 shadow-lg select-none">
@@ -72,150 +102,95 @@ export function TaskTree({
 
         {isRootExpanded && (
           <div className="flex flex-col gap-0.5 pt-1">
-            {/* Task [A] Phân tích yêu cầu */}
-            <div className="flex items-center justify-between rounded-md px-2 py-1.5 transition hover:bg-[#142235]/50">
-              <div className="flex items-center gap-2.5">
-                <span className="font-mono text-[12px] text-[#8297B2]">├</span>
-                <span className="flex h-5 w-6 items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] font-mono text-[11px] font-semibold text-[#58E9A8]">
-                  A
-                </span>
-                <span className="text-[#EAF2FF]">Phân tích yêu cầu</span>
+            {tasks.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center text-[#8297B2]">
+                <IconLayers size={22} className="mb-2 text-[#405672]" />
+                <span className="text-[12px] font-medium text-[#9DB0C8]">Chưa có quy trình DAG</span>
+                <span className="mt-0.5 text-[11px] text-[#8297B2]">Gửi yêu cầu phân tích/xử lý trong khung Chat để kích hoạt tác vụ</span>
               </div>
-              <div className="flex items-center gap-4">
-                <span className="flex w-[68px] items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] px-1.5 py-0.5 text-[11px] font-medium text-[#58E9A8]">
-                  ChatGPT
-                </span>
-                <span className="w-20 text-right text-[11px] text-[#58E9A8]">
-                  ✓ Hoàn tất
-                </span>
-              </div>
-            </div>
+            ) : (
+              tasks.map((task, idx) => {
+                const isCompleted = task.status === 'COMPLETED';
+                const isRunning = task.status === 'RUNNING';
+                const isFailed = task.status === 'FAILED';
+                const agentColor = getAgentColor(task.assigned_agent);
+                const isLast = idx === tasks.length - 1;
+                const isHighlighted = highlightCode === task.step_code;
 
-            {/* Task [B] Chọn khoảnh khắc (Active / Highlighted in 01 Dashboard.svg) */}
-            <div
-              onMouseEnter={() => onHover?.('B')}
-              className={`flex flex-col rounded-lg p-1.5 shadow-sm transition-colors ${
-                highlightCode === 'B' || !highlightCode ? 'bg-[#142235]' : 'bg-[#142235]/60'
-              }`}
-            >
-              <div className="flex items-center justify-between px-1 py-0.5">
-                <div className="flex items-center gap-2.5">
-                  <span className="font-mono text-[12px] text-[#8297B2]">├</span>
-                  <span className="flex h-5 w-6 items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] font-mono text-[11px] font-semibold text-[#A88BFA]">
-                    B
-                  </span>
-                  <span className="font-medium text-[#EAF2FF]">
-                    Chọn khoảnh khắc
-                  </span>
-                </div>
-                <div className="flex items-center gap-4">
-                  <span className="flex w-[68px] items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] px-1.5 py-0.5 text-[11px] font-medium text-[#A88BFA]">
-                    Gemini
-                  </span>
-                  <span className="w-24 text-right font-mono text-[11px] text-[#A88BFA]">
-                    62% · Đang chạy
-                  </span>
-                </div>
-              </div>
+                return (
+                  <div
+                    key={task.step_code}
+                    onMouseEnter={() => onHover?.(task.step_code)}
+                    className={`flex flex-col rounded-lg p-1.5 transition-colors ${
+                      isHighlighted ? 'bg-[#142235] ring-1 ring-[#58E9A8]/40' : 'hover:bg-[#142235]/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between px-1 py-0.5">
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-mono text-[12px] text-[#8297B2]">
+                          {isLast && (!task.sub_tasks || task.sub_tasks.length === 0) ? '└' : '├'}
+                        </span>
+                        <span
+                          className="flex h-5 w-6 items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] font-mono text-[11px] font-semibold"
+                          style={{ color: agentColor }}
+                        >
+                          {task.step_code}
+                        </span>
+                        <span className="text-[#EAF2FF]">{task.title}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {task.assigned_agent && (
+                          <span
+                            className="flex min-w-[58px] items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] px-1.5 py-0.5 text-[11px] font-medium"
+                            style={{ color: agentColor }}
+                          >
+                            {getAgentLabel(task.assigned_agent)}
+                          </span>
+                        )}
+                        <span
+                          className="w-20 text-right text-[11px]"
+                          style={{
+                            color: isCompleted ? '#58E9A8' : isRunning ? agentColor : isFailed ? '#FF5449' : '#8297B2',
+                          }}
+                        >
+                          {isCompleted ? '✓ Hoàn tất' : isRunning ? 'Đang chạy' : isFailed ? '✕ Lỗi' : 'Chờ'}
+                        </span>
+                      </div>
+                    </div>
 
-              {/* Sub-tasks of B */}
-              <div className="flex flex-col gap-1 pl-4 pt-1">
-                {/* [B1] Phát hiện cảnh */}
-                <div className="flex items-center justify-between px-2 py-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[12px] text-[#8297B2]">└</span>
-                    <span className="flex h-4 w-7 items-center justify-center rounded border border-[#23344A] bg-[#0A1220] font-mono text-[10px] text-[#A88BFA]">
-                      B1
-                    </span>
-                    <span className="text-[#9DB0C8]">Phát hiện cảnh</span>
+                    {/* Sub-tasks */}
+                    {task.sub_tasks && task.sub_tasks.length > 0 && (
+                      <div className="flex flex-col gap-1 pl-4 pt-1">
+                        {task.sub_tasks.map((sub) => {
+                          const subDone = sub.status === 'COMPLETED';
+                          const subRunning = sub.status === 'RUNNING';
+                          return (
+                            <div key={sub.sub_code} className="flex items-center justify-between px-2 py-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-[12px] text-[#8297B2]">└</span>
+                                <span
+                                  className="flex h-4 w-7 items-center justify-center rounded border border-[#23344A] bg-[#0A1220] font-mono text-[10px]"
+                                  style={{ color: agentColor }}
+                                >
+                                  {sub.sub_code}
+                                </span>
+                                <span className="text-[#9DB0C8]">{sub.title}</span>
+                              </div>
+                              <span
+                                className="w-20 text-right text-[10.5px]"
+                                style={{ color: subDone ? '#58E9A8' : subRunning ? agentColor : '#8297B2' }}
+                              >
+                                {subDone ? '✓ Hoàn tất' : subRunning ? 'Đang chạy' : 'Chờ'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className="flex w-[68px] items-center justify-center rounded border border-[#23344A] bg-[#0A1220] px-1.5 text-[10px] text-[#A88BFA]">
-                      Gemini
-                    </span>
-                    <span className="w-20 text-right text-[11px] text-[#A88BFA]">
-                      Đang chạy
-                    </span>
-                  </div>
-                </div>
-
-                {/* [B2] Chấm điểm cảnh */}
-                <div className="flex items-center justify-between px-2 py-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[12px] text-[#8297B2]">└</span>
-                    <span className="flex h-4 w-7 items-center justify-center rounded border border-[#23344A] bg-[#0A1220] font-mono text-[10px] text-[#A88BFA]">
-                      B2
-                    </span>
-                    <span className="text-[#9DB0C8]">Chấm điểm cảnh</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="flex w-[68px] items-center justify-center rounded border border-[#23344A] bg-[#0A1220] px-1.5 text-[10px] text-[#A88BFA]">
-                      Gemini
-                    </span>
-                    <span className="w-20 text-right text-[11px] text-[#A88BFA]">
-                      Đang chạy
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Task [C] Viết pipeline */}
-            <div className="flex items-center justify-between rounded-md px-2 py-1.5 transition hover:bg-[#142235]/50">
-              <div className="flex items-center gap-2.5">
-                <span className="font-mono text-[12px] text-[#8297B2]">├</span>
-                <span className="flex h-5 w-6 items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] font-mono text-[11px] font-semibold text-[#78BAFF]">
-                  C
-                </span>
-                <span className="text-[#EAF2FF]">Viết pipeline</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="flex w-[68px] items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] px-1.5 py-0.5 text-[11px] font-medium text-[#78BAFF]">
-                  Codex
-                </span>
-                <span className="w-20 text-right text-[11px] text-[#78BAFF]">
-                  Đang chạy
-                </span>
-              </div>
-            </div>
-
-            {/* Task [D] Kiểm thử */}
-            <div className="flex items-center justify-between rounded-md px-2 py-1.5 transition hover:bg-[#142235]/50">
-              <div className="flex items-center gap-2.5">
-                <span className="font-mono text-[12px] text-[#8297B2]">├</span>
-                <span className="flex h-5 w-6 items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] font-mono text-[11px] font-semibold text-[#78BAFF]">
-                  D
-                </span>
-                <span className="text-[#EAF2FF]">Kiểm thử</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="flex w-[68px] items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] px-1.5 py-0.5 text-[11px] font-medium text-[#78BAFF]">
-                  Codex
-                </span>
-                <span className="w-20 text-right text-[11px] text-[#8297B2]">
-                  Chờ
-                </span>
-              </div>
-            </div>
-
-            {/* Task [E] Tổng hợp */}
-            <div className="flex items-center justify-between rounded-md px-2 py-1.5 transition hover:bg-[#142235]/50">
-              <div className="flex items-center gap-2.5">
-                <span className="font-mono text-[12px] text-[#8297B2]">└</span>
-                <span className="flex h-5 w-6 items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] font-mono text-[11px] font-semibold text-[#FFC075]">
-                  E
-                </span>
-                <span className="text-[#EAF2FF]">Tổng hợp</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="flex w-[68px] items-center justify-center rounded-[4px] border border-[#23344A] bg-[#0A1220] px-1.5 py-0.5 text-[11px] font-medium text-[#FFC075]">
-                  Claude
-                </span>
-                <span className="w-20 text-right text-[11px] text-[#8297B2]">
-                  Chờ
-                </span>
-              </div>
-            </div>
+                );
+              })
+            )}
           </div>
         )}
       </div>

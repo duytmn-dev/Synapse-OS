@@ -55,7 +55,55 @@ function registerIPC(): void {
   disposePhase0 = registerPhase0Handlers(ipcMain, () => mainWindow?.webContents ?? null,
     { ...createWorkspaceHandlers(shadowWorkspaceManager, () => mainWindow?.webContents ?? null),
       ...createSettingsHandlers(settingsService, new SystemSettingsService(app.getPath('userData'), app.getVersion())),
-      ...createGraphHandlers(knowledgeGraphService, () => mainWindow?.webContents ?? null) });
+      ...createGraphHandlers(knowledgeGraphService, () => mainWindow?.webContents ?? null),
+      getTaskTree: async () => {
+        const currentTasks = dagExecutor.getTasks();
+        const completed = currentTasks.filter((t) => t.status === 'COMPLETED').length;
+        return {
+          root_title: 'Quy trình DAG',
+          completed_count: completed,
+          total_count: currentTasks.length,
+          tasks: currentTasks.map((t) => ({
+            task_code: t.step_code,
+            title: t.title,
+            assigned_agent: (t.assigned_agent ?? 'codex') as any,
+            status: t.status === 'WAITING' ? ('PENDING' as const) : t.status,
+            children: t.sub_tasks?.map((sub) => ({
+              task_code: sub.sub_code,
+              title: sub.title,
+              assigned_agent: (t.assigned_agent ?? 'gemini') as any,
+              status: sub.status === 'WAITING' ? ('PENDING' as const) : (sub.status as any),
+            })),
+          })),
+        };
+      },
+    });
+  dagExecutor.onTasksUpdated(() => {
+    try {
+      const contents = mainWindow?.webContents;
+      if (contents && !contents.isDestroyed()) {
+        const currentTasks = dagExecutor.getTasks();
+        const completed = currentTasks.filter((t) => t.status === 'COMPLETED').length;
+        contents.send(IPC.taskTreeUpdated, {
+          root_title: 'Quy trình DAG',
+          completed_count: completed,
+          total_count: currentTasks.length,
+          tasks: currentTasks.map((t) => ({
+            task_code: t.step_code,
+            title: t.title,
+            assigned_agent: (t.assigned_agent ?? 'codex') as any,
+            status: t.status === 'WAITING' ? 'PENDING' : t.status,
+            children: t.sub_tasks?.map((sub) => ({
+              task_code: sub.sub_code,
+              title: sub.title,
+              assigned_agent: (t.assigned_agent ?? 'gemini') as any,
+              status: sub.status === 'WAITING' ? 'PENDING' : sub.status,
+            })),
+          })),
+        });
+      }
+    } catch { /* ignore */ }
+  });
   disposeCredentials = registerSettingsCredentials(ipcMain, () => mainWindow?.webContents ?? null, settingsService);
   officeBridge = new VisualOfficeBridge(dagExecutor, ipcMain, () => mainWindow?.webContents ?? null);
   ipcMain.handle(IPC.getStorage, (event) => {

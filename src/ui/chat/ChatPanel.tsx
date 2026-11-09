@@ -13,6 +13,8 @@ interface ChatPanelProps {
   connectedAgents: AgentQuotaStat[];
   onSend: (text: string, target: TargetAgent, files: File[]) => void;
   onFocusGraph?: () => void;
+  onRunCode?: (code: import('./types').ChatCode) => void;
+  onApplyCode?: (code: import('./types').ChatCode) => void;
 }
 
 export function ChatPanel({
@@ -22,6 +24,8 @@ export function ChatPanel({
   connectedAgents,
   onSend,
   onFocusGraph,
+  onRunCode,
+  onApplyCode,
 }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -107,28 +111,30 @@ export function ChatPanel({
                 </p>
               )}
 
-              {/* Agent Running Status banner */}
-              <div className="flex w-full items-center justify-between rounded-lg border border-[#405672] bg-[#142235] px-3.5 py-2 shadow-sm">
-                <div className="flex items-center gap-2 text-[12px] font-medium text-[#A88BFA]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#A88BFA] shadow-[0_0_6px_#A88BFA]" />
-                  <span>Gemini đang chọn khoảnh khắc</span>
+              {/* Agent Running Status banner if orchestration exists */}
+              {m.orchestration && (
+                <div className="flex w-full items-center justify-between rounded-lg border border-[#405672] bg-[#142235] px-3.5 py-2 shadow-sm">
+                  <div className="flex items-center gap-2 text-[12px] font-medium text-[#A88BFA]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#A88BFA] shadow-[0_0_6px_#A88BFA]" />
+                    <span>{m.orchestration.label}</span>
+                  </div>
+                  {onFocusGraph && (
+                    <button
+                      type="button"
+                      onClick={onFocusGraph}
+                      className="flex items-center gap-1 text-[11.5px] text-[#9DB0C8] transition hover:text-[#EAF2FF]"
+                    >
+                      <span>Xem đồ thị</span>
+                      <IconExternal size={12} />
+                    </button>
+                  )}
                 </div>
-                {onFocusGraph && (
-                  <button
-                    type="button"
-                    onClick={onFocusGraph}
-                    className="flex items-center gap-1 text-[11.5px] text-[#9DB0C8] transition hover:text-[#EAF2FF]"
-                  >
-                    <span>Xem đồ thị</span>
-                    <IconExternal size={12} />
-                  </button>
-                )}
-              </div>
+              )}
 
               {/* Code block if present */}
               {m.code && (
                 <div className="w-full">
-                  <CodeBlock code={m.code} />
+                  <CodeBlock code={m.code} onRun={onRunCode} onApply={onApplyCode} />
                 </div>
               )}
 

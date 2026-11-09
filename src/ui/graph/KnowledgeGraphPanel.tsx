@@ -232,25 +232,57 @@ export function KnowledgeGraphPanel({
     return () => window.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  // Merge nodes with real IPC graphData if present
+  // Build nodes from real IPC graphData or fallback to default mock nodes
   const nodesMap = useMemo(() => {
-    const merged: Record<string, InternalGraphNode> = { ...DEFAULT_NODES };
-    if (graphData && graphData.nodes) {
-      for (const gn of graphData.nodes) {
-        const existing = merged[gn.id];
-        if (existing) {
-          merged[gn.id] = {
-            ...existing,
-            label: gn.label || existing.label,
-            functionCount: gn.function_count ?? existing.functionCount,
-            linkCount: gn.link_count ?? existing.linkCount,
-            visualState: gn.visual_state ?? existing.visualState,
-            isFocused: gn.is_focused ?? existing.isFocused,
-          };
-        }
-      }
+    if (graphData && graphData.nodes && graphData.nodes.length > 0) {
+      const result: Record<string, InternalGraphNode> = {};
+      const total = graphData.nodes.length;
+      graphData.nodes.forEach((gn, idx) => {
+        const def = DEFAULT_NODES[gn.id];
+        const angle = (2 * Math.PI * idx) / total;
+        const radius = total > 6 ? 165 + (idx % 3) * 35 : 130;
+        const autoX = Math.round(1120 + Math.cos(angle) * radius);
+        const autoY = Math.round(310 + Math.sin(angle) * (radius * 0.75));
+
+        const nodeType: InternalGraphNode['type'] = def
+          ? def.type
+          : gn.id.endsWith('()')
+            ? 'function'
+            : gn.id.endsWith('.yaml') || gn.id.endsWith('.json')
+              ? 'config'
+              : gn.id.includes('test')
+                ? 'test'
+                : 'source';
+
+        result[gn.id] = {
+          id: gn.id,
+          label: gn.label || gn.id,
+          x: def ? def.x : autoX,
+          y: def ? def.y : autoY,
+          type: nodeType,
+          textYOffset: def ? def.textYOffset : 24,
+          functionCount: gn.function_count ?? 0,
+          linkCount: gn.link_count ?? 0,
+          lastModified: 'Vừa xong',
+          visualState: gn.visual_state ?? 'DEFAULT',
+          isFocused: gn.is_focused ?? false,
+        };
+      });
+      return result;
     }
-    return merged;
+    return DEFAULT_NODES;
+  }, [graphData]);
+
+  // Dynamic edges list
+  const edgesList = useMemo(() => {
+    if (graphData && graphData.edges && graphData.edges.length > 0) {
+      return graphData.edges.map((e) => ({
+        source: e.source,
+        target: e.target,
+        dashed: e.relation !== 'IMPORTS',
+      }));
+    }
+    return EDGES_TOPOLOGY;
   }, [graphData]);
 
   // Compute active path based on IPC GraphActiveEvent
@@ -456,7 +488,7 @@ export function KnowledgeGraphPanel({
         <div className="absolute left-3 top-3 z-10 flex items-center gap-2 pointer-events-none">
           <div className="flex items-center rounded-md border border-[#23344A] bg-[#0A1220]/90 px-2.5 py-1 backdrop-blur-sm">
             <span className="font-mono text-[11px] font-medium text-[#8297B2]">
-              {graphData?.total_nodes ?? 9} NODES / {graphData?.total_edges ?? 10} EDGES
+              {graphData?.total_nodes ?? Object.keys(nodesMap).length} NODES / {graphData?.total_edges ?? edgesList.length} EDGES
             </span>
           </div>
 
@@ -637,8 +669,8 @@ export function KnowledgeGraphPanel({
               </filter>
             </defs>
 
-            {/* Inactive & Dashed Edges (Standard topology from 01 Dashboard.svg) */}
-            {EDGES_TOPOLOGY.map((edge) => {
+            {/* Inactive & Dashed Edges (Dynamic from graphData or fallback) */}
+            {edgesList.map((edge) => {
               const src = nodesMap[edge.source];
               const tgt = nodesMap[edge.target];
               if (!src || !tgt) return null;
@@ -660,89 +692,94 @@ export function KnowledgeGraphPanel({
               );
             })}
 
-            {/* Glowing Edge 1: main.py -> pipeline.py (Active ChatGPT - Green #58E9A8) */}
-            <path id="path-edge-1" d="M943 272L1103 279" fill="none" />
-            <line
-              x1="943"
-              y1="272"
-              x2="1103"
-              y2="279"
-              stroke="#58E9A8"
-              strokeWidth="6"
-              opacity={focusedNodeId && focusedNodeId !== 'main.py' && focusedNodeId !== 'pipeline.py' ? 0.08 : 0.25}
-            />
-            <line
-              x1="943"
-              y1="272"
-              x2="1103"
-              y2="279"
-              stroke="#58E9A8"
-              strokeWidth="2"
-              filter="url(#glow-green)"
-              opacity={focusedNodeId && focusedNodeId !== 'main.py' && focusedNodeId !== 'pipeline.py' ? 0.2 : 1}
-            />
-            <circle r="3" fill="#EEFFF7">
-              <animateMotion dur="2.2s" repeatCount="indefinite">
-                <mpath href="#path-edge-1" />
-              </animateMotion>
-            </circle>
-            <path d="M1062 277L1056 280.5M1062 277L1056 273.5" stroke="#58E9A8" strokeWidth="1.5" />
+            {/* Glowing Demo Edges (Only displayed during initial mock preview without graphData) */}
+            {!graphData && (
+              <>
+                {/* Glowing Edge 1: main.py -> pipeline.py (Active ChatGPT - Green #58E9A8) */}
+                <path id="path-edge-1" d="M943 272L1103 279" fill="none" />
+                <line
+                  x1="943"
+                  y1="272"
+                  x2="1103"
+                  y2="279"
+                  stroke="#58E9A8"
+                  strokeWidth="6"
+                  opacity={focusedNodeId && focusedNodeId !== 'main.py' && focusedNodeId !== 'pipeline.py' ? 0.08 : 0.25}
+                />
+                <line
+                  x1="943"
+                  y1="272"
+                  x2="1103"
+                  y2="279"
+                  stroke="#58E9A8"
+                  strokeWidth="2"
+                  filter="url(#glow-green)"
+                  opacity={focusedNodeId && focusedNodeId !== 'main.py' && focusedNodeId !== 'pipeline.py' ? 0.2 : 1}
+                />
+                <circle r="3" fill="#EEFFF7">
+                  <animateMotion dur="2.2s" repeatCount="indefinite">
+                    <mpath href="#path-edge-1" />
+                  </animateMotion>
+                </circle>
+                <path d="M1062 277L1056 280.5M1062 277L1056 273.5" stroke="#58E9A8" strokeWidth="1.5" />
 
-            {/* Glowing Edge 2: pipeline.py -> scene_detect.py (Active Gemini - Purple #A88BFA) */}
-            <path id="path-edge-2" d="M1103 279L1270 218" fill="none" />
-            <line
-              x1="1103"
-              y1="279"
-              x2="1270"
-              y2="218"
-              stroke="#A88BFA"
-              strokeWidth="6"
-              opacity={focusedNodeId && focusedNodeId !== 'pipeline.py' && focusedNodeId !== 'scene_detect.py' ? 0.08 : 0.25}
-            />
-            <line
-              x1="1103"
-              y1="279"
-              x2="1270"
-              y2="218"
-              stroke="#A88BFA"
-              strokeWidth="2"
-              filter="url(#glow-purple)"
-              opacity={focusedNodeId && focusedNodeId !== 'pipeline.py' && focusedNodeId !== 'scene_detect.py' ? 0.2 : 1}
-            />
-            <circle r="3" fill="#EEFFF7">
-              <animateMotion dur="2.4s" repeatCount="indefinite">
-                <mpath href="#path-edge-2" />
-              </animateMotion>
-            </circle>
-            <path d="M1210 240L1206 245M1210 240L1204 238.5" stroke="#A88BFA" strokeWidth="1.5" />
+                {/* Glowing Edge 2: pipeline.py -> scene_detect.py (Active Gemini - Purple #A88BFA) */}
+                <path id="path-edge-2" d="M1103 279L1270 218" fill="none" />
+                <line
+                  x1="1103"
+                  y1="279"
+                  x2="1270"
+                  y2="218"
+                  stroke="#A88BFA"
+                  strokeWidth="6"
+                  opacity={focusedNodeId && focusedNodeId !== 'pipeline.py' && focusedNodeId !== 'scene_detect.py' ? 0.08 : 0.25}
+                />
+                <line
+                  x1="1103"
+                  y1="279"
+                  x2="1270"
+                  y2="218"
+                  stroke="#A88BFA"
+                  strokeWidth="2"
+                  filter="url(#glow-purple)"
+                  opacity={focusedNodeId && focusedNodeId !== 'pipeline.py' && focusedNodeId !== 'scene_detect.py' ? 0.2 : 1}
+                />
+                <circle r="3" fill="#EEFFF7">
+                  <animateMotion dur="2.4s" repeatCount="indefinite">
+                    <mpath href="#path-edge-2" />
+                  </animateMotion>
+                </circle>
+                <path d="M1210 240L1206 245M1210 240L1204 238.5" stroke="#A88BFA" strokeWidth="1.5" />
 
-            {/* Glowing Edge 3: scene_detect.py -> score_scene() (Active Gemini - Purple #A88BFA) */}
-            <path id="path-edge-3" d="M1270 218L1274 327" fill="none" />
-            <line
-              x1="1270"
-              y1="218"
-              x2="1274"
-              y2="327"
-              stroke="#A88BFA"
-              strokeWidth="6"
-              opacity={focusedNodeId && focusedNodeId !== 'scene_detect.py' && focusedNodeId !== 'score_scene()' ? 0.08 : 0.25}
-            />
-            <line
-              x1="1270"
-              y1="218"
-              x2="1274"
-              y2="327"
-              stroke="#A88BFA"
-              strokeWidth="2"
-              filter="url(#glow-purple)"
-              opacity={focusedNodeId && focusedNodeId !== 'scene_detect.py' && focusedNodeId !== 'score_scene()' ? 0.2 : 1}
-            />
-            <circle r="3" fill="#EEFFF7">
-              <animateMotion dur="1.8s" repeatCount="indefinite">
-                <mpath href="#path-edge-3" />
-              </animateMotion>
-            </circle>
-            <path d="M1272.5 288L1269 282.5M1272.5 288L1276 282" stroke="#A88BFA" strokeWidth="1.5" />
+                {/* Glowing Edge 3: scene_detect.py -> score_scene() (Active Gemini - Purple #A88BFA) */}
+                <path id="path-edge-3" d="M1270 218L1274 327" fill="none" />
+                <line
+                  x1="1270"
+                  y1="218"
+                  x2="1274"
+                  y2="327"
+                  stroke="#A88BFA"
+                  strokeWidth="6"
+                  opacity={focusedNodeId && focusedNodeId !== 'scene_detect.py' && focusedNodeId !== 'score_scene()' ? 0.08 : 0.25}
+                />
+                <line
+                  x1="1270"
+                  y1="218"
+                  x2="1274"
+                  y2="327"
+                  stroke="#A88BFA"
+                  strokeWidth="2"
+                  filter="url(#glow-purple)"
+                  opacity={focusedNodeId && focusedNodeId !== 'scene_detect.py' && focusedNodeId !== 'score_scene()' ? 0.2 : 1}
+                />
+                <circle r="3" fill="#EEFFF7">
+                  <animateMotion dur="1.8s" repeatCount="indefinite">
+                    <mpath href="#path-edge-3" />
+                  </animateMotion>
+                </circle>
+                <path d="M1272.5 288L1269 282.5M1272.5 288L1276 282" stroke="#A88BFA" strokeWidth="1.5" />
+              </>
+            )}
 
             {/* DYNAMIC PATH LIGHTS UP (From IPC GraphActiveEvent) */}
             {activePath?.source && (
@@ -903,9 +940,9 @@ export function KnowledgeGraphPanel({
                     </>
                   )}
 
-                  {['config', 'source', 'test'].includes(node.type) && (
+                  {!['pipeline', 'module', 'function', 'error', 'ignored'].includes(node.type) && (
                     <>
-                      <circle cx={node.x} cy={node.y} r="5" fill="#0A1220" stroke="#9FB2CC" strokeWidth="1.5" />
+                      <circle cx={node.x} cy={node.y} r={node.type === 'config' || node.type === 'test' ? 5 : 6} fill="#0A1220" stroke="#9FB2CC" strokeWidth="1.5" />
                       <text
                         x={node.x}
                         y={node.y + node.textYOffset}
