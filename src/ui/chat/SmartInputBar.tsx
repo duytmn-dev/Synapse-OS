@@ -64,7 +64,7 @@ export function SmartInputBar({ onSend, agents, sendDisabled }: SmartInputBarPro
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKey}
         rows={2}
-        placeholder="Nhập yêu cầu cho dự án..."
+        placeholder="Nhập tin nhắn..."
         className="max-h-32 w-full resize-none bg-transparent px-1 text-[13px] text-[#EAF2FF] outline-none placeholder:text-[#8297B2]"
       />
 

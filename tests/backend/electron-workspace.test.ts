@@ -8,6 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSyn
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { build } from 'vite';
+import react from '@vitejs/plugin-react';
 
 test('bundled preload and real Electron main use SQLite in isolated appData', { timeout: 40000 }, async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'synapse-electron-workspace-'));
@@ -26,6 +27,12 @@ test('bundled preload and real Electron main use SQLite in isolated appData', { 
         rollupOptions: { external },
       } });
     }
+    const repo = fileURLToPath(new URL('../../', import.meta.url));
+    await build({
+      configFile: false, root: repo, base: './', logLevel: 'error', plugins: [react()],
+      resolve: { alias: { '@shared': path.join(repo, 'src', 'shared') } },
+      build: { outDir: path.join(root, 'renderer'), emptyOutDir: false },
+    });
     const electron = createRequire(import.meta.url)('electron') as string;
     const env: NodeJS.ProcessEnv = { ...process.env, SYNAPSE_WORKSPACE_TEST_ROOT: root, SYNAPSE_TEST_NODE: process.execPath };
     delete env.ELECTRON_RUN_AS_NODE;

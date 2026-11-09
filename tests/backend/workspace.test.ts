@@ -101,6 +101,45 @@ test('CRUD preserves literal titles, pin state, timestamps and project isolation
   assert.deepEqual(snapshot(project), before);
 });
 
+test('standalone chats persist and remain isolated from two project histories', async (t) => {
+  const { root, project, userData, manager } = fixture(t);
+  const other = path.join(root, 'other');
+  mkdirSync(other);
+  const before = [snapshot(project), snapshot(other)];
+  assert.deepEqual(manager.listSessions(null), []);
+  assert.throws(() => lstatSync(userData), { code: 'ENOENT' });
+
+  const firstHash = (await manager.openProject(project)).project_hash;
+  const secondHash = (await manager.openProject(other)).project_hash;
+  const scopes = [null, firstHash, secondHash] as const;
+  const chats = scopes.map((scope, index) => {
+    const [session] = manager.mutateSession({ action: 'CREATE', project_hash: scope, new_title: 'Chat' });
+    const messages = [{ author: 'user', text: `Tin nhắn ${index}` }];
+    assert.deepEqual(manager.saveSessionMessages(scope, session.session_id, messages).map((row) => row.session_id), [session.session_id]);
+    return { id: session.session_id, messages };
+  });
+
+  const restarted = new ShadowWorkspaceManager(userData);
+  for (const [index, scope] of scopes.entries()) {
+    const { id, messages } = chats[index];
+    assert.deepEqual(restarted.listSessions(scope).map((row) => [row.session_id, row.project_hash]), [[id, scope]]);
+    assert.deepEqual(restarted.readSessionMessages(scope, id), messages);
+    const foreignId = chats[(index + 1) % chats.length].id;
+    assert.throws(() => restarted.readSessionMessages(scope, foreignId), /SESSION_NOT_FOUND/);
+    assert.throws(() => restarted.saveSessionMessages(scope, foreignId, []), /SESSION_NOT_FOUND/);
+    assert.throws(() => restarted.mutateSession({ action: 'DELETE', project_hash: scope, session_id: foreignId }), /SESSION_NOT_FOUND/);
+  }
+  const standalone = { project_hash: null, session_id: chats[0].id };
+  assert.equal(restarted.mutateSession({ ...standalone, action: 'RENAME', new_title: 'Chat độc lập' })[0].title, 'Chat độc lập');
+  assert.equal(restarted.mutateSession({ ...standalone, action: 'TOGGLE_PIN' })[0].is_pinned, true);
+  assert.deepEqual(restarted.mutateSession({ ...standalone, action: 'DELETE' }), []);
+  assert.deepEqual(restarted.listProjects().flatMap((entry) => entry.sessions.map((row) => row.session_id)).sort(),
+    [chats[1].id, chats[2].id].sort());
+  assert.equal(readFileSync(path.join(userData, 'chats', 'standalone.db')).subarray(0, 16).toString(), 'SQLite format 3\0');
+  restarted.dispose();
+  assert.deepEqual([snapshot(project), snapshot(other)], before);
+});
+
 test('CREATE hydrates persisted requirements, old summaries and graph into RAM; never stores the prompt', async (t) => {
   const { project, userData, manager } = fixture(t);
   const before = snapshot(project);
@@ -165,7 +204,7 @@ test('invalid mutations and unknown scopes fail without creating files or changi
   assert.throws(() => lstatSync(userData), { code: 'ENOENT' });
   const hash = (await manager.openProject(project)).project_hash;
   const before = snapshot(project);
-  const invalid: unknown[] = [null, {}, { action: 'CREATE' }, { action: 'CREATE', project_hash: null, new_title: 'Standalone' },
+  const invalid: unknown[] = [null, {}, { action: 'CREATE' }, { action: 'CREATE', project_hash: null, new_title: ' ' },
     { action: 'CREATE', project_hash: '../escape', new_title: 'Bad' },
     { action: 'CREATE', project_hash: hash, new_title: ' ' },
     { action: 'CREATE', project_hash: hash, new_title: 'A', session_id: 'supplied' },

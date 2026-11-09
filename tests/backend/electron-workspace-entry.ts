@@ -85,10 +85,16 @@ void app.whenReady().then(async () => {
       const pinned = await window.synapse.mutateChatSession({action:'TOGGLE_PIN', project_hash:hash, session_id:id});
       const projects = await window.synapse.getShadowProjects();
       const sessions = await window.synapse.getChatSessions(hash);
+      const [standalone] = await window.synapse.mutateChatSession({action:'CREATE', project_hash:null, new_title:'Standalone chat'});
+      const standaloneMessages = [{id:'one', author:'user', authorName:'Bạn', time:'12:34', text:'Standalone message', attachments:[]}];
+      await window.synapse.saveChatMessages(null, standalone.session_id, standaloneMessages);
+      const savedMessages = await window.synapse.getChatMessages(null, standalone.session_id);
+      let isolationError;
+      try { await window.synapse.getChatMessages(hash, standalone.session_id); } catch (caught) { isolationError = caught.message; }
       let error;
       try { await window.synapse.mutateChatSession({action:'CREATE',project_hash:hash}); } catch (caught) { error = caught.message; }
       stop();
-      return {id, pinned, projects, sessions, notifications, error, node:typeof require};
+      return {id, pinned, projects, sessions, notifications, error, savedMessages, standaloneMessages, isolationError, node:typeof require};
     })()`);
     assert.equal(result.node, 'undefined');
     assert.equal(result.pinned[0].is_pinned, true);
@@ -96,11 +102,67 @@ void app.whenReady().then(async () => {
     assert.equal(result.projects[0].project_hash, hash);
     assert.ok(result.notifications.length >= 3);
     assert.match(result.error, /INVALID_ARGUMENT/);
+    assert.deepEqual(result.savedMessages, result.standaloneMessages);
+    assert.match(result.isolationError, /SESSION_NOT_FOUND/);
     assert.equal(manager.getSessionContext(hash, result.id).core_requirements, 'Real Electron hydration');
     assert.equal(readFileSync(path.join(app.getPath('userData'), 'projects', hash, 'project.db')).subarray(0, 16).toString(), 'SQLite format 3\0');
     const deleted = await window.webContents.executeJavaScript(`window.synapse.mutateChatSession({action:'DELETE',project_hash:${JSON.stringify(hash)},session_id:${JSON.stringify(result.id)}})`);
     assert.deepEqual(deleted, []);
-    console.log('ELECTRON_WORKSPACE_OK: real SQLite, appData path, isolated preload, IPC CRUD, hydration, notifications and serialized errors');
+
+    const renderer = path.join(root, 'renderer', 'index.html');
+    await window.loadFile(renderer);
+    await window.webContents.executeJavaScript(`(async () => {
+      const wait = async (find, label) => {
+        for (let tries = 0; tries < 200; tries++) {
+          const match = find();
+          if (match) return match;
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        throw new Error('Renderer did not show ' + label);
+      };
+      const namedButton = (text, scope = document) =>
+        [...scope.querySelectorAll('button')].find(button => button.textContent.trim() === text);
+      const titleIs = (text) => document.querySelector('h1')?.textContent.trim() === text;
+      const sidebar = await wait(() => document.querySelector('aside'), 'Sidebar');
+      await wait(() => namedButton('Standalone chat', sidebar), 'standalone history');
+      await wait(() => document.body.textContent.includes('Standalone message'), 'saved standalone message');
+      const projectLabel = await wait(() => [...sidebar.querySelectorAll('span')].find(node =>
+        node.textContent.trim() === 'source'), 'project');
+      projectLabel.click();
+      const newProjectChat = await wait(() => sidebar.querySelector('[aria-label="Tạo chat trong dự án source"]'), 'project chat button');
+      newProjectChat.click();
+      await wait(() => sidebar.querySelector('[aria-current="true"]')?.textContent.trim() === 'Cuộc trò chuyện 1', 'selected project chat');
+      if (document.body.textContent.includes('Standalone message')) throw new Error('Standalone transcript leaked into project');
+      const textarea = document.querySelector('textarea');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'Project-only message');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      (await wait(() => { const send = namedButton('Gửi'); return send && !send.disabled && send; }, 'enabled send button')).click();
+      await wait(() => document.body.textContent.includes('Project-only message'), 'saved project message');
+      namedButton('Cuộc trò chuyện mới', sidebar).click();
+      await wait(() => titleIs('Cuộc trò chuyện 2') && !sidebar.querySelector('[aria-label="Tạo chat trong dự án source"]'), 'new standalone chat');
+      if (document.body.textContent.includes('Project-only message')) throw new Error('Project transcript leaked into standalone chat');
+      namedButton('Standalone chat', sidebar).click();
+      await wait(() => document.body.textContent.includes('Standalone message'), 'selected standalone transcript');
+      projectLabel.click();
+      await wait(() => document.body.textContent.includes('Project-only message'), 'selected project transcript');
+    })()`);
+    const standaloneChats = manager.listSessions(null);
+    assert.equal(standaloneChats.length, 2);
+    const [projectChat] = manager.listSessions(hash);
+    assert.equal(manager.listSessions(hash).length, 1);
+    assert.match(JSON.stringify(manager.readSessionMessages(hash, projectChat.session_id)), /Project-only message/);
+    await window.loadFile(renderer);
+    assert.ok(await window.webContents.executeJavaScript(`(async () => {
+      for (let tries = 0; tries < 200; tries++) {
+        const sidebar = document.querySelector('aside');
+        if (sidebar?.textContent.includes('Standalone chat') && sidebar.textContent.includes('Cuộc trò chuyện 2')) {
+          return !sidebar.textContent.includes('Cuộc trò chuyện 1') && !document.body.textContent.includes('Project-only message');
+        }
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      return false;
+    })()`));
+    console.log('ELECTRON_WORKSPACE_OK: isolated preload, real SQLite, IPC CRUD and separate sidebar histories');
   } finally { disposeCredentials(); graphBridge.dispose(); dispose(); manager.dispose(); window.destroy(); }
   clearTimeout(timer);
   app.exit(0);

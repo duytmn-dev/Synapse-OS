@@ -321,7 +321,7 @@ export function useSynapseBridge() {
   }, []);
 
   const mutateChatSession = useCallback(
-    async (request: ChatSessionMutationRequest): Promise<ChatSessionItem[]> => {
+    async (request: ChatSessionMutationRequest & { project_hash: string | null }): Promise<ChatSessionItem[]> => {
       if (!bridge?.mutateChatSession) throw new Error('Hãy mở Synapse OS bằng Electron để quản lý cuộc trò chuyện.');
       const sessions = await bridge.mutateChatSession(request);
       applySessions(request.project_hash, sessions);
