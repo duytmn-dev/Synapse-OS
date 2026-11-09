@@ -162,19 +162,7 @@ export function useSynapseBridge() {
           }
         }
 
-        // Nếu chưa có project nào mở, tự động mở thư mục hiện tại
-        let currentHash: string | null = projects.length > 0 ? projects[0].project_hash : null;
-        if (!currentHash && bridge.openShadowProject) {
-          try {
-            const opened = await bridge.openShadowProject('.');
-            if (opened) {
-              projects = [opened];
-              currentHash = opened.project_hash;
-            }
-          } catch (e) {
-            console.warn('[synapse] openShadowProject(.) warning:', e);
-          }
-        }
+        const currentHash = projects[0]?.project_hash ?? null;
 
         const [quotaSnap, tasksSnap, officeSnap, activeRoomsSnap, networkSnap, appearanceSnap, toolsSnap, updatesSnap, storageSnap, sessionsSnap, graphSnap] =
           await Promise.all([
@@ -198,10 +186,10 @@ export function useSynapseBridge() {
             tasks: tasksSnap ?? prev.tasks,
             office: officeSnap ?? prev.office,
             activeRooms: activeRoomsSnap?.active_rooms ?? prev.activeRooms,
-            shadowProjects: projects,
-            activeProjectHash: currentHash ?? prev.activeProjectHash,
-            chatSessions: sessionsSnap ?? prev.chatSessions,
-            graphData: graphSnap ?? prev.graphData,
+            shadowProjects: prev.activeProjectHash ? prev.shadowProjects : projects,
+            activeProjectHash: prev.activeProjectHash ?? currentHash,
+            chatSessions: prev.activeProjectHash ? prev.chatSessions : sessionsSnap,
+            graphData: prev.activeProjectHash ? prev.graphData : graphSnap,
             networkSettings: networkSnap ?? prev.networkSettings,
             appearanceSettings: (appearanceSnap as AppearanceSettings) ?? prev.appearanceSettings,
             toolDependencies: toolsSnap && toolsSnap.length > 0 ? toolsSnap : prev.toolDependencies,
@@ -257,11 +245,11 @@ export function useSynapseBridge() {
     if (bridge.onGraphDataUpdated) {
       offs.push(
         bridge.onGraphDataUpdated((graph) =>
-          setState((s) => ({
+          setState((s) => s.activeProjectHash === graph.project_hash ? ({
             ...s,
             graphData: graph,
             live: true,
-          }))
+          }) : s)
         )
       );
     }
@@ -318,19 +306,23 @@ export function useSynapseBridge() {
     [bridge]
   );
 
-  const openShadowProject = useCallback(
-    async (projectPath: string): Promise<ShadowProjectMeta | null> => {
-      if (bridge?.openShadowProject) {
-        const meta = await bridge.openShadowProject(projectPath);
-        setState((s) => ({
-          ...s,
-          shadowProjects: [...s.shadowProjects.filter((p) => p.project_hash !== meta.project_hash), meta],
-          activeProjectHash: meta.project_hash,
-          chatSessions: meta.sessions,
-        }));
-        return meta;
-      }
-      return null;
+  const pickShadowProject = useCallback(
+    async (): Promise<ShadowProjectMeta | null> => {
+      if (!bridge?.pickShadowProject) throw new Error('Hãy mở Synapse OS bằng ứng dụng Electron để chọn thư mục.');
+      const meta = await bridge.pickShadowProject();
+      if (!meta) return null;
+      setState((s) => ({
+        ...s,
+        shadowProjects: [...s.shadowProjects.filter((p) => p.project_hash !== meta.project_hash), meta],
+        activeProjectHash: meta.project_hash,
+        chatSessions: meta.sessions,
+        graphData: s.graphData?.project_hash === meta.project_hash ? s.graphData : null,
+        graphActiveEvent: null,
+      }));
+      void bridge.getGraphData(meta.project_hash).then((graph) => {
+        setState((s) => s.activeProjectHash === graph.project_hash ? { ...s, graphData: graph } : s);
+      }).catch((error: unknown) => console.warn('[synapse] Không tải được đồ thị dự án:', error));
+      return meta;
     },
     [bridge]
   );
@@ -601,7 +593,7 @@ export function useSynapseBridge() {
   return {
     ...state,
     selectProject,
-    openShadowProject,
+    pickShadowProject,
     mutateChatSession,
     agentConnectionAction,
     setFallbackOnError,

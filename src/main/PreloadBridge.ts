@@ -22,6 +22,7 @@ export function createSynapseAPI(ipc: Pick<IpcRenderer, 'invoke' | 'on' | 'remov
     getGraphData: (projectHash) => invoke('getGraphData', projectHash),
     controlGraphNode: (command) => invoke('controlGraphNode', command),
     openShadowProject: (projectPath) => invoke('openShadowProject', projectPath),
+    pickShadowProject: () => invoke('pickShadowProject'),
     getShadowProjects: () => invoke('getShadowProjects'),
     getChatSessions: (projectHash) => invoke('getChatSessions', projectHash),
     mutateChatSession: (request) => invoke('mutateChatSession', request),

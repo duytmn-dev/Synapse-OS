@@ -21,6 +21,7 @@ type Expected = {
   getGraphData: (projectHash: string) => Promise<GraphDataSnapshot>;
   controlGraphNode: (command: GraphNodeControlCommand) => Promise<void>;
   openShadowProject: (projectPath: string) => Promise<ShadowProjectInfo>;
+  pickShadowProject: () => Promise<ShadowProjectInfo | null>;
   getShadowProjects: () => Promise<ShadowProjectInfo[]>;
   getChatSessions: (projectHash: string | null) => Promise<ChatSessionItem[]>;
   mutateChatSession: (request: ChatSessionMutationRequest) => Promise<ChatSessionItem[]>;

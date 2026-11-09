@@ -22,6 +22,7 @@ export const IPC = {
   graphDataUpdated: 'graph_data_update',
   graphActiveEvent: 'graph_active_event',
   openShadowProject: 'synapse:shadow:open',
+  pickShadowProject: 'synapse:shadow:pick',
   getShadowProjects: 'synapse:shadow:list',
   shadowProjectsUpdated: 'shadow_projects_update',
   getChatSessions: 'synapse:chat:list',
@@ -65,6 +66,7 @@ export interface SynapseRequests {
   getGraphData(projectHash: string): Promise<GraphData>;
   controlGraphNode(command: GraphNodeControlCommand): Promise<void>;
   openShadowProject(projectPath: string): Promise<ShadowProjectMeta>;
+  pickShadowProject(): Promise<ShadowProjectMeta | null>;
   getShadowProjects(): Promise<ShadowProjectMeta[]>;
   // null selects standalone conversations; no implicit current project.
   getChatSessions(projectHash: string | null): Promise<ChatSessionItem[]>;
@@ -105,6 +107,7 @@ export const REQUEST_CHANNELS = {
   getGraphData: IPC.getGraphData,
   controlGraphNode: IPC.controlGraphNode,
   openShadowProject: IPC.openShadowProject,
+  pickShadowProject: IPC.pickShadowProject,
   getShadowProjects: IPC.getShadowProjects,
   getChatSessions: IPC.getChatSessions,
   mutateChatSession: IPC.mutateChatSession,

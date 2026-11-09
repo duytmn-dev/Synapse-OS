@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSynapseBridge } from './hooks/useSynapseBridge';
 import type { ChatMessage, Conversation, TargetAgent, ViewMode } from '../ui/chat/types';
 import { getAgentMeta } from '../ui/agents';
@@ -28,7 +28,7 @@ export default function App() {
     workspaceStorage,
     updateStatus,
     selectProject,
-    openShadowProject,
+    pickShadowProject,
     mutateChatSession,
     agentConnectionAction,
     setFallbackOnError,
@@ -45,6 +45,8 @@ export default function App() {
   const [activeId, setActiveId] = useState<string>('');
   const [threads, setThreads] = useState<Record<string, ChatMessage[]>>({});
   const [highlight, setHighlight] = useState<string | null>(null);
+  const openingProject = useRef(false);
+  const [projectError, setProjectError] = useState<string | null>(null);
 
   // Chat Popover & Modal state (07 Quản lý chat.svg)
   const [menuTarget, setMenuTarget] = useState<ChatMenuTarget | null>(null);
@@ -194,9 +196,16 @@ export default function App() {
   };
 
   const handleOpenProjectFolder = async () => {
-    const inputPath = window.prompt('Nhập đường dẫn thư mục dự án cần mở:');
-    if (inputPath && inputPath.trim()) {
-      await openShadowProject(inputPath.trim());
+    if (openingProject.current) return;
+    openingProject.current = true;
+    setProjectError(null);
+    try {
+      await pickShadowProject();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setProjectError(message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ''));
+    } finally {
+      openingProject.current = false;
     }
   };
 
@@ -210,6 +219,8 @@ export default function App() {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onSelectProject={handleOpenProjectFolder}
       />
+
+      {projectError && <p role="alert" className="text-sm text-red-300">Không thể mở dự án. {projectError}</p>}
 
       {/* Main 3-Column Layout */}
       <div className="flex min-h-0 flex-1 gap-3">

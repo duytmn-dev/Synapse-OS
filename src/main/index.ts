@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { IPC } from './ipc';
@@ -53,7 +53,14 @@ function registerIPC(): void {
   });
   knowledgeGraphService = new KnowledgeGraphService(shadowWorkspaceManager);
   disposePhase0 = registerPhase0Handlers(ipcMain, () => mainWindow?.webContents ?? null,
-    { ...createWorkspaceHandlers(shadowWorkspaceManager, () => mainWindow?.webContents ?? null),
+    { ...createWorkspaceHandlers(shadowWorkspaceManager, () => mainWindow?.webContents ?? null, async () => {
+        const owner = mainWindow;
+        if (!owner || owner.isDestroyed()) throw new Error('DIRECTORY_PICKER_UNAVAILABLE: Cửa sổ ứng dụng đã đóng');
+        const result = await dialog.showOpenDialog(owner, { title: 'Mở thư mục dự án', properties: ['openDirectory'] });
+        if (result.canceled || owner.isDestroyed()) return null;
+        if (!result.filePaths[0]) throw new Error('DIRECTORY_NOT_SELECTED: Không nhận được đường dẫn thư mục');
+        return result.filePaths[0];
+      }),
       ...createSettingsHandlers(settingsService, new SystemSettingsService(app.getPath('userData'), app.getVersion())),
       ...createGraphHandlers(knowledgeGraphService, () => mainWindow?.webContents ?? null),
       getTaskTree: async () => {

@@ -19,6 +19,7 @@ const requests = {
   getGraphData: ['synapse:graph:get', ['0123456789abcdef']],
   controlGraphNode: ['synapse:graph:control', [{ project_hash: '0123456789abcdef', node_id: 'main.ts', command: 'FOCUS' }]],
   openShadowProject: ['synapse:shadow:open', ['D:\\example']],
+  pickShadowProject: ['synapse:shadow:pick', []],
   getShadowProjects: ['synapse:shadow:list', []],
   getChatSessions: ['synapse:chat:list', [null]],
   mutateChatSession: ['synapse:chat:mutate', [{ action: 'CREATE', project_hash: null, new_title: 'Test' }]],

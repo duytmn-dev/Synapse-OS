@@ -228,6 +228,26 @@ test('actual Git branch including unborn HEAD is read without writing to the rep
   assert.deepEqual(snapshot(project), before);
 });
 
+test('folder picker cancellation is a no-op and selection opens a real shadow workspace', async (t) => {
+  const { project, manager } = fixture(t);
+  const before = snapshot(project);
+  let selected: string | null = null;
+  const notifications: string[] = [];
+  const contents = { isDestroyed: () => false, send: (channel: string) => notifications.push(channel) } as unknown as WebContents;
+  const handlers = createWorkspaceHandlers(manager, () => contents, async () => selected);
+
+  assert.equal(await handlers.pickShadowProject(), null);
+  assert.deepEqual(manager.listProjects(), []);
+  assert.deepEqual(notifications, []);
+
+  selected = project;
+  const opened = await handlers.pickShadowProject();
+  assert.equal(opened?.original_path, project);
+  assert.deepEqual(manager.listProjects(), [opened]);
+  assert.deepEqual(notifications, [IPC.shadowProjectsUpdated]);
+  assert.deepEqual(snapshot(project), before);
+});
+
 test('real service IPC adapters persist CRUD, emit snapshots and enforce sender authorization', async (t) => {
   const { project, manager } = fixture(t);
   const handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();

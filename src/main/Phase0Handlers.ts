@@ -14,6 +14,7 @@ export const phase0Handlers = {
   getGraphData: async (_projectHash) => unavailable('getGraphData'),
   controlGraphNode: async (_command) => unavailable('controlGraphNode'),
   openShadowProject: async (_projectPath) => unavailable('openShadowProject'),
+  pickShadowProject: async () => unavailable('pickShadowProject'),
   getShadowProjects: async () => unavailable('getShadowProjects'),
   getChatSessions: async (_projectHash) => unavailable('getChatSessions'),
   mutateChatSession: async (_request) => unavailable('mutateChatSession'),

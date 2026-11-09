@@ -28,8 +28,9 @@ void app.whenReady().then(async () => {
   } });
   const secrets = new SecretStore(path.join(app.getPath('userData'), 'secrets'));
   const settings = new SettingsService(app.getPath('userData'), secrets);
+  let selectedDirectory: string | null = null;
   const dispose = registerPhase0Handlers(ipcMain, () => window.webContents, {
-    ...createWorkspaceHandlers(manager, () => window.webContents),
+    ...createWorkspaceHandlers(manager, () => window.webContents, async () => selectedDirectory),
     ...createSettingsHandlers(settings, new SystemSettingsService(app.getPath('userData'), app.getVersion())),
   });
   const disposeCredentials = registerSettingsCredentials(ipcMain, () => window.webContents, settings);
@@ -39,7 +40,11 @@ void app.whenReady().then(async () => {
   try {
     await window.loadURL('data:text/html,<html><body>Workspace integration test</body></html>');
     const sourcePath = path.join(root, 'source');
-    const opened = await window.webContents.executeJavaScript(`window.synapse.openShadowProject(${JSON.stringify(sourcePath)})`);
+    assert.equal(await window.webContents.executeJavaScript('window.synapse.pickShadowProject()'), null);
+    assert.deepEqual(manager.listProjects(), []);
+    selectedDirectory = sourcePath;
+    const opened = await window.webContents.executeJavaScript('window.synapse.pickShadowProject()');
+    assert.equal(opened.original_path, sourcePath);
     const hash = opened.project_hash as string;
     await window.webContents.executeJavaScript(`window.graphEvents = []; window.stopGraph = window.synapse.onGraphActiveEvent(e => window.graphEvents.push(e)); void 0`);
     await activity.run({ project_hash: hash, agent_id: 'codex', worker_model_name: 'integration-test-model',
