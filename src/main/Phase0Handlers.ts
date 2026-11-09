@@ -1,5 +1,5 @@
 import type { IpcMain, WebContents } from 'electron';
-import { REQUEST_CHANNELS, type SynapseRequests } from './ipc.ts';
+import { REQUEST_CHANNELS, type ChatTurn, type SynapseRequests } from './ipc.ts';
 
 export type Phase0Requests = Omit<SynapseRequests,
   'getQuota' | 'getTasks' | 'getOffice' | 'getActiveRooms' | 'getWorkspaceStorage' | 'saveAgentKey'>;
@@ -21,6 +21,9 @@ export const phase0Handlers = {
   saveChatMessages: async (_projectHash, _sessionId, _messages) => unavailable('saveChatMessages'),
   mutateChatSession: async (_request) => unavailable('mutateChatSession'),
   sendGeminiMessage: async (_message) => unavailable('sendGeminiMessage'),
+  sendCodexMessage: async (_message) => unavailable('sendCodexMessage'),
+  getChatAgents: async () => unavailable('getChatAgents'),
+  sendAgentMessage: async (_target, _message, _history?: ChatTurn[]) => unavailable('sendAgentMessage'),
   getTaskTree: async () => unavailable('getTaskTree'),
   getAINetworkSettings: async () => unavailable('getAINetworkSettings'),
   setDefaultChatAgent: async (_agentId) => unavailable('setDefaultChatAgent'),

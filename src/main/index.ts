@@ -24,6 +24,8 @@ import { CodexBrowserAuth } from '../adapters/CodexBrowserAuth.ts';
 import { ClaudeBrowserAuth } from '../adapters/ClaudeBrowserAuth.ts';
 import { AntigravityBrowserAuth } from '../adapters/AntigravityBrowserAuth.ts';
 import { ChatGPTViaCodexAuth } from './ChatGPTViaCodexAuth.ts';
+import { createChatHandlers } from './ChatHandlers.ts';
+import { sendClaudeMessage } from '../adapters/ClaudeChat.ts';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -59,14 +61,20 @@ function registerIPC(): void {
     isChatGPTLinked: () => settingsService.isChatGPTLinked(),
     setChatGPTLinked: (linked) => settingsService.setChatGPTLinked(linked),
   }, codexAuth);
-  settingsService = new SettingsService(userData, secretStore, (agent, status) => {
-    agentStatusBridge?.update({ agent_id: agent, connection_status: status.connection_status,
-      worker_model_name: status.worker_model_name, keychain_configured: null });
-  }, new ProviderRegistry(userData, codexAuth, {
+  const providers = new ProviderRegistry(userData, codexAuth, {
     chatgpt: { display_name: 'ChatGPT', role_description: 'Tài khoản ChatGPT dùng chung với Codex', auth: chatgptAuth },
     claude: { display_name: 'Claude', role_description: 'Claude Code', auth: new ClaudeBrowserAuth(userData) },
     gemini: { display_name: 'Gemini', role_description: 'Google Antigravity CLI', auth: antigravity },
-  }));
+  }, {
+    gemini: (message) => antigravity.sendMessage(message),
+    chatgpt: (message) => chatgptAuth.sendMessage(message),
+    codex: (message) => codexAuth.sendMessage(message),
+    claude: async (message) => sendClaudeMessage(await secretStore.read('claude'), message),
+  });
+  settingsService = new SettingsService(userData, secretStore, (agent, status) => {
+    agentStatusBridge?.update({ agent_id: agent, connection_status: status.connection_status,
+      worker_model_name: status.worker_model_name, keychain_configured: null });
+  }, providers);
   knowledgeGraphService = new KnowledgeGraphService(shadowWorkspaceManager);
   disposePhase0 = registerPhase0Handlers(ipcMain, () => mainWindow?.webContents ?? null,
     { ...createWorkspaceHandlers(shadowWorkspaceManager, () => mainWindow?.webContents ?? null, async () => {
@@ -79,7 +87,9 @@ function registerIPC(): void {
       }),
       ...createSettingsHandlers(settingsService, new SystemSettingsService(app.getPath('userData'), app.getVersion())),
       ...createGraphHandlers(knowledgeGraphService, () => mainWindow?.webContents ?? null),
+      ...createChatHandlers(providers),
       sendGeminiMessage: (message) => antigravity.sendMessage(message),
+      sendCodexMessage: (message) => codexAuth.sendMessage(message),
       getTaskTree: async () => {
         const currentTasks = dagExecutor.getTasks();
         const completed = currentTasks.filter((t) => t.status === 'COMPLETED').length;

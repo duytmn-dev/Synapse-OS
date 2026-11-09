@@ -450,23 +450,6 @@ export function useSynapseBridge() {
     [bridge]
   );
 
-  const setDefaultChatAgent = useCallback(
-    async (agentId: string): Promise<AINetworkSettings> => {
-      if (bridge?.setDefaultChatAgent) {
-        const updated = await bridge.setDefaultChatAgent(agentId);
-        setState((s) => ({ ...s, networkSettings: updated }));
-        return updated;
-      }
-      const updated: AINetworkSettings = {
-        ...state.networkSettings,
-        default_chat_agent_id: agentId,
-      };
-      setState((s) => ({ ...s, networkSettings: updated }));
-      return updated;
-    },
-    [bridge, state.networkSettings]
-  );
-
   const saveAppearanceSettings = useCallback(
     async (settings: AppearanceAndGraphSettings): Promise<void> => {
       if (bridge?.saveAppearanceSettings) {
@@ -549,7 +532,6 @@ export function useSynapseBridge() {
     setFallbackOnError,
     setAgentAlertThreshold,
     saveAgentKey,
-    setDefaultChatAgent,
     saveAppearanceSettings,
     ensureToolDependency,
     controlGraphNode,

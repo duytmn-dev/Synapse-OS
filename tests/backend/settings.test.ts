@@ -202,6 +202,7 @@ test('built-in Codex uses browser OAuth without provider config and reads actual
   assert.doesNotMatch(JSON.stringify(profile), /private@example/);
   assert.equal((await service.action('codex', 'REFRESH')).connection_status, 'CONNECTED');
   assert.equal((await service.action('codex', 'DISCONNECT')).connection_status, 'DISCONNECTED');
+  await assert.rejects(auth.sendMessage('Kiểm tra sau khi đăng xuất'), /CODEX_NOT_CONNECTED/);
 });
 
 test('Codex cannot open a non-OpenAI authorization URL', async (t) => {

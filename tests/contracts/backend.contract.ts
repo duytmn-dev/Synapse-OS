@@ -6,7 +6,7 @@ import type {
   AgentSettingsProfile, AppearanceAndGraphSettings, ToolDependencyStatus,
   WorkspaceStorageInfo, UpdateStatus,
 } from '../../src/shared/types';
-import type { ActiveRoomsSnapshot, SynapseAPI } from '../../src/main/ipc';
+import type { ActiveRoomsSnapshot, ChatAgent, ChatReply, ChatTurn, SynapseAPI } from '../../src/main/ipc';
 import type { createSynapseAPI } from '../../src/main/PreloadBridge';
 import type { Phase0Requests, phase0Handlers } from '../../src/main/Phase0Handlers';
 
@@ -28,6 +28,9 @@ type Expected = {
   saveChatMessages: (projectHash: string | null, sessionId: string, messages: unknown[]) => Promise<ChatSessionItem[]>;
   mutateChatSession: (request: ChatSessionMutationRequest) => Promise<ChatSessionItem[]>;
   sendGeminiMessage: (message: string) => Promise<string>;
+  sendCodexMessage: (message: string) => Promise<string>;
+  getChatAgents: () => Promise<ChatAgent[]>;
+  sendAgentMessage: (target: string, message: string, history?: ChatTurn[]) => Promise<ChatReply>;
   getTaskTree: () => Promise<TaskTreeSnapshot>;
   getAINetworkSettings: () => Promise<AINetworkSettings>;
   setDefaultChatAgent: (agentId: AINetworkSettings['default_chat_agent_id']) => Promise<AINetworkSettings>;

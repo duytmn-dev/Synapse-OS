@@ -1,5 +1,5 @@
 import type { IpcRenderer, IpcRendererEvent } from 'electron';
-import { EVENT_CHANNELS, REQUEST_CHANNELS, type SynapseAPI, type SynapseRequests } from './ipc.ts';
+import { EVENT_CHANNELS, REQUEST_CHANNELS, type ChatTurn, type SynapseAPI, type SynapseRequests } from './ipc.ts';
 
 /** Only allowlisted operations are exposed; Electron event objects stay private. */
 export function createSynapseAPI(ipc: Pick<IpcRenderer, 'invoke' | 'on' | 'removeListener'>) {
@@ -29,6 +29,9 @@ export function createSynapseAPI(ipc: Pick<IpcRenderer, 'invoke' | 'on' | 'remov
     saveChatMessages: (projectHash, sessionId, messages) => invoke('saveChatMessages', projectHash, sessionId, messages),
     mutateChatSession: (request) => invoke('mutateChatSession', request),
     sendGeminiMessage: (message) => invoke('sendGeminiMessage', message),
+    sendCodexMessage: (message) => invoke('sendCodexMessage', message),
+    getChatAgents: () => invoke('getChatAgents'),
+    sendAgentMessage: (target, message, history?: ChatTurn[]) => invoke('sendAgentMessage', target, message, history),
     getTaskTree: () => invoke('getTaskTree'),
     getAINetworkSettings: () => invoke('getAINetworkSettings'),
     setDefaultChatAgent: (agentId) => invoke('setDefaultChatAgent', agentId),

@@ -1,16 +1,17 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
-import type { AgentQuotaStat } from '@shared/types';
+import type { ChatAgent } from '../../main/ipc';
 import { getAgentMeta } from '../agents';
 import type { TargetAgent } from './types';
 import { IconChevronDown, IconPaperclip, IconSendPlane, IconX } from '../icons';
 
 interface SmartInputBarProps {
   onSend: (text: string, target: TargetAgent, files: File[]) => void;
-  agents: AgentQuotaStat[];
+  agents: ChatAgent[];
+  onOpenAgentMenu: () => void;
   sendDisabled?: boolean;
 }
 
-export function SmartInputBar({ onSend, agents, sendDisabled }: SmartInputBarProps) {
+export function SmartInputBar({ onSend, agents, onOpenAgentMenu, sendDisabled }: SmartInputBarProps) {
   const [text, setText] = useState('');
   const [target, setTarget] = useState<TargetAgent>('auto');
   const [files, setFiles] = useState<File[]>([]);
@@ -98,10 +99,13 @@ export function SmartInputBar({ onSend, agents, sendDisabled }: SmartInputBarPro
             <button
               type="button"
               className={toolBtn}
-              onClick={() => setMenu(menu === 'agent' ? null : 'agent')}
+              onClick={() => {
+                if (menu !== 'agent') onOpenAgentMenu();
+                setMenu(menu === 'agent' ? null : 'agent');
+              }}
             >
               <span>
-                {target === 'auto' ? '@Agent' : `@${getAgentMeta(target).label}`}
+                {target === 'auto' ? '@Agent' : `@${agents.find((agent) => agent.id === target)?.label ?? target}`}
               </span>
             </button>
             {menu === 'agent' && (
@@ -115,23 +119,23 @@ export function SmartInputBar({ onSend, agents, sendDisabled }: SmartInputBarPro
                       setMenu(null);
                     }}
                   >
-                    <span>✦ Tự động điều phối</span>
+                    <span>✦ Gemini → ChatGPT</span>
                   </button>
                 </li>
                 {agents.map((a) => {
-                  const m = getAgentMeta(a.agent_id);
+                  const m = getAgentMeta(a.id);
                   return (
-                    <li key={a.agent_id}>
+                    <li key={a.id}>
                       <button
                         type="button"
                         className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[#9DB0C8] hover:bg-[#142235] hover:text-[#EAF2FF]"
                         onClick={() => {
-                          setTarget(a.agent_id);
+                          setTarget(a.id);
                           setMenu(null);
                         }}
                       >
                         <span style={{ color: m.color }}>{m.glyph}</span>
-                        <span>{m.label}</span>
+                        <span>{a.label}</span>
                       </button>
                     </li>
                   );

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentId, AgentSettingsProfile } from '../shared/types';
 import { runCLI, type AgentCLIConfig } from './CLIAdapter.ts';
@@ -21,37 +21,46 @@ export type ProviderAction = 'CONNECT' | 'DISCONNECT' | 'REFRESH' | 'CHECK_CLI';
 export interface ProviderConfig {
   display_name: string;
   role_description: string;
-  commands: { status: AgentCLIConfig; check_cli?: AgentCLIConfig; connect?: AgentCLIConfig; disconnect?: AgentCLIConfig };
+  commands: { status: AgentCLIConfig; check_cli?: AgentCLIConfig; connect?: AgentCLIConfig; disconnect?: AgentCLIConfig; chat?: AgentCLIConfig };
 }
 const codexProfile = { display_name: 'Codex', role_description: 'Thực thi mã nguồn và DAG pipelines' };
 type ProviderDetails = Pick<ProviderConfig, 'display_name' | 'role_description'>;
 type ProviderEntry = ProviderConfig | ProviderDetails;
+type ConfiguredProvider = ProviderDetails & { commands: Partial<ProviderConfig['commands']> };
 export type BrowserAuth = { action(action: ProviderAction): Promise<ProviderStatus> };
+type ChatSender = (message: string) => Promise<string>;
+export type ChatProvider = { id: string; label: string; send: ChatSender };
+const accountAgents: readonly string[] = ['gemini', 'chatgpt', 'codex', 'claude'];
 export type BrowserProviders = Partial<Record<AgentId, ProviderDetails & { auth: BrowserAuth }>>;
 
 /** Trusted backend configuration. CLI wrappers must normalize their verified
  * provider response, including quota, into ProviderStatus JSON. No guessed flags. */
 export class ProviderRegistry {
   private readonly browser: BrowserProviders;
-  constructor(private readonly userData: string, codexAuth?: BrowserAuth, otherProviders: BrowserProviders = {}) {
+  constructor(private readonly userData: string, codexAuth?: BrowserAuth, otherProviders: BrowserProviders = {},
+    private readonly chat: Partial<Record<AgentId, ChatSender>> = {}) {
     this.browser = { ...(codexAuth ? { codex: { ...codexProfile, auth: codexAuth } } : {}), ...otherProviders };
   }
-  async configurations(): Promise<Partial<Record<AgentId, ProviderEntry>>> {
+  private async readConfiguration(): Promise<Record<string, ConfiguredProvider>> {
     let input: unknown;
     try { input = JSON.parse(await readFile(path.join(this.userData, 'agent-providers.json'), 'utf8')); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Cannot read provider configuration');
-      if (!Object.keys(this.browser).length) throw new WorkspaceError('PROVIDER_NOT_CONFIGURED', 'Configure agent-providers.json in userData');
       input = {};
     }
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Expected agent configuration object');
     for (const [agent, config] of Object.entries(input)) {
-      validateAgent(agent);
+      if (!/^[a-z][a-z0-9_-]{0,63}$/.test(agent) || ['auto', 'gemini_antigravity', 'constructor', 'prototype'].includes(agent)) {
+        throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Invalid provider ID');
+      }
       if (!config || typeof config !== 'object') throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Invalid provider');
       requiredText(config.display_name, 'display_name'); requiredText(config.role_description, 'role_description');
-      if (!config.commands?.status) throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Status command required');
+      if (!config.commands || typeof config.commands !== 'object' || Array.isArray(config.commands) ||
+        (accountAgents.includes(agent) ? !config.commands.status : !config.commands.chat)) {
+        throw new WorkspaceError('PROVIDER_CONFIG_INVALID', `Missing required command for ${agent}`);
+      }
       for (const [name, command] of Object.entries(config.commands)) {
-        if (!['status', 'check_cli', 'connect', 'disconnect'].includes(name) || !command || typeof command !== 'object') throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Invalid command');
+        if (!['status', 'check_cli', 'connect', 'disconnect', 'chat'].includes(name) || !command || typeof command !== 'object') throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Invalid command');
         const value = command as AgentCLIConfig;
         requiredText(value.executable, 'executable');
         if (!path.isAbsolute(value.executable) || /\.(cmd|bat)$/i.test(value.executable) ||
@@ -60,13 +69,45 @@ export class ProviderRegistry {
         }
       }
     }
-    const configured = input as Partial<Record<AgentId, ProviderEntry>>;
+    return input as Record<string, ConfiguredProvider>;
+  }
+
+  async configurations(): Promise<Partial<Record<AgentId, ProviderEntry>>> {
+    const input = await this.readConfiguration();
+    const configured = Object.fromEntries(Object.entries(input).filter(([id]) => accountAgents.includes(id))) as Partial<Record<AgentId, ProviderEntry>>;
     for (const [id, provider] of Object.entries(this.browser)) {
       const agent = id as AgentId;
       configured[agent] ??= { display_name: provider.display_name, role_description: provider.role_description };
     }
-    if (!Object.keys(configured).length) throw new WorkspaceError('PROVIDER_NOT_CONFIGURED', 'No configured providers');
+    if (!Object.keys(configured).length) throw new WorkspaceError('PROVIDER_NOT_CONFIGURED', 'Configure agent-providers.json in userData');
     return configured;
+  }
+
+  async chatProviders(): Promise<ChatProvider[]> {
+    const configured = await this.readConfiguration();
+    const providers = new Map<string, ChatProvider>();
+    for (const [id, send] of Object.entries(this.chat)) {
+      if (!send) continue;
+      const label = this.browser[id as AgentId]?.display_name ?? configured[id]?.display_name ?? id;
+      providers.set(id, { id, label, send });
+    }
+    for (const [id, config] of Object.entries(configured)) {
+      const command = config.commands.chat;
+      if (!command) continue;
+      providers.set(id, { id, label: config.display_name, send: (message) => this.runChatCommand(id, command, message) });
+    }
+    return [...providers.values()];
+  }
+
+  private async runChatCommand(id: string, command: AgentCLIConfig, message: string): Promise<string> {
+    const cwd = path.join(this.userData, 'provider-chat', id);
+    try {
+      await mkdir(cwd, { recursive: true, mode: 0o700 });
+      const { stdout } = await runCLI({ ...command, cwd, stdin: message, timeoutMs: command.timeoutMs ?? 120000, maxOutputBytes: 1024 * 1024 });
+      return stdout.trim();
+    } catch {
+      throw new WorkspaceError('PROVIDER_CHAT_FAILED', 'Lệnh chat thất bại. Kiểm tra CLI và tài khoản của agent.');
+    }
   }
   async config(agent: AgentId): Promise<ProviderEntry> {
     validateAgent(agent);

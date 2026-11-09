@@ -30,6 +30,9 @@ export const IPC = {
   saveChatMessages: 'synapse:chat:messages:save',
   mutateChatSession: 'synapse:chat:mutate',
   sendGeminiMessage: 'synapse:chat:gemini',
+  sendCodexMessage: 'synapse:chat:codex',
+  getChatAgents: 'synapse:chat:agents:get',
+  sendAgentMessage: 'synapse:chat:send',
   chatSessionsUpdated: 'chat_sessions_update',
   getTaskTree: 'synapse:task_tree:get',
   taskTreeUpdated: 'task_tree_update',
@@ -58,6 +61,10 @@ export interface ActiveRoomsSnapshot {
   storage?: import('../shared/types').WorkspaceStorageInfo;
 }
 
+export interface ChatAgent { id: string; label: string }
+export interface ChatTurn { agentId: string; request: string; reply: string }
+export interface ChatReply { agentId: string; label: string; text: string }
+
 // IPC operation signatures only; all domain payloads come from shared/types.ts.
 export interface SynapseRequests {
   getQuota(): Promise<AgentQuotaStat[]>;
@@ -78,6 +85,9 @@ export interface SynapseRequests {
   // Returns the affected scope's remaining sessions, including after DELETE.
   mutateChatSession(request: ChatSessionMutationRequest): Promise<ChatSessionItem[]>;
   sendGeminiMessage(message: string): Promise<string>;
+  sendCodexMessage(message: string): Promise<string>;
+  getChatAgents(): Promise<ChatAgent[]>;
+  sendAgentMessage(target: string, message: string, history?: ChatTurn[]): Promise<ChatReply>;
   getTaskTree(): Promise<TaskTreeSnapshot>;
   getAINetworkSettings(): Promise<AINetworkSettings>;
   setDefaultChatAgent(agentId: AINetworkSettings['default_chat_agent_id']): Promise<AINetworkSettings>;
@@ -120,6 +130,9 @@ export const REQUEST_CHANNELS = {
   saveChatMessages: IPC.saveChatMessages,
   mutateChatSession: IPC.mutateChatSession,
   sendGeminiMessage: IPC.sendGeminiMessage,
+  sendCodexMessage: IPC.sendCodexMessage,
+  getChatAgents: IPC.getChatAgents,
+  sendAgentMessage: IPC.sendAgentMessage,
   getTaskTree: IPC.getTaskTree,
   getAINetworkSettings: IPC.getAINetworkSettings,
   setDefaultChatAgent: IPC.setDefaultChatAgent,

@@ -13,6 +13,9 @@ import { SystemSettingsService } from '../../src/main/SystemSettingsService.ts';
 import { createSettingsHandlers, registerSettingsCredentials } from '../../src/main/SettingsHandlers.ts';
 import { GraphActivity } from '../../src/core/GraphActivity.ts';
 import { GraphEventBridge } from '../../src/main/GraphEventBridge.ts';
+import { CodexBrowserAuth } from '../../src/adapters/CodexBrowserAuth.ts';
+import { ProviderRegistry } from '../../src/adapters/ProviderRegistry.ts';
+import { createChatHandlers } from '../../src/main/ChatHandlers.ts';
 
 const root = process.env.SYNAPSE_WORKSPACE_TEST_ROOT;
 if (!root || !path.isAbsolute(root)) throw new Error('Missing isolated test directory');
@@ -28,10 +31,53 @@ void app.whenReady().then(async () => {
   } });
   const secrets = new SecretStore(path.join(app.getPath('userData'), 'secrets'));
   const settings = new SettingsService(app.getPath('userData'), secrets);
+  const codexFixture = path.join(root, 'codex-chat-fixture.cjs');
+  writeFileSync(codexFixture, `
+    const assert = require('node:assert/strict');
+    const path = require('node:path');
+    const emit = (data) => console.log(JSON.stringify(data));
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { id, method, params } = JSON.parse(line);
+      if (id === undefined) return;
+      let result = {};
+      if (method === 'account/read') {
+        assert.equal(path.basename(process.env.CODEX_HOME), 'codex-account');
+        result = { account: { type: 'chatgpt' } };
+      } else if (method === 'thread/start') {
+        assert.equal(params.cwd, path.join(path.dirname(process.env.CODEX_HOME), 'codex-chat'));
+        assert.equal(params.ephemeral, true);
+        assert.equal(params.sandbox, 'read-only');
+        assert.equal(params.approvalPolicy, 'never');
+        result = { thread: { id: 'thread' } };
+      } else if (method === 'turn/start') {
+        assert.equal(params.threadId, 'thread');
+        assert.equal(params.sandboxPolicy.type, 'readOnly');
+        assert.equal(params.approvalPolicy, 'never');
+        const [input] = params.input;
+        assert.equal(input.type, 'text');
+        emit({ method: 'item/completed', params: { threadId: 'foreign', turnId: 'other', item: { type: 'agentMessage', phase: 'final_answer', text: 'Other thread' } } });
+        emit({ method: 'item/completed', params: { threadId: 'thread', turnId: 'turn', item: { type: 'agentMessage', phase: 'commentary', text: 'Internal progress' } } });
+        if (input.text !== 'empty test') {
+          emit({ method: 'item/completed', params: { threadId: 'thread', turnId: 'turn', item: { type: 'agentMessage', phase: 'final_answer', text: 'Codex reply to ' + input.text } } });
+        }
+        const status = input.text === 'quota test' ? 'failed' : 'completed';
+        const error = status === 'failed' ? { codexErrorInfo: 'usageLimitExceeded' } : null;
+        emit({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn', status, error } } });
+        result = { turn: { id: 'turn' } };
+      }
+      emit({ id, result });
+    });
+  `);
+  const node = process.env.SYNAPSE_TEST_NODE;
+  assert.ok(node);
+  const codex = new CodexBrowserAuth(app.getPath('userData'), async () => { throw new Error('Unexpected browser open'); }, [node, codexFixture]);
+  const providers = new ProviderRegistry(app.getPath('userData'), codex, {}, { codex: (message) => codex.sendMessage(message) });
   let selectedDirectory: string | null = null;
   const dispose = registerPhase0Handlers(ipcMain, () => window.webContents, {
     ...createWorkspaceHandlers(manager, () => window.webContents, async () => selectedDirectory),
     ...createSettingsHandlers(settings, new SystemSettingsService(app.getPath('userData'), app.getVersion())),
+    sendCodexMessage: (message) => codex.sendMessage(message),
+    ...createChatHandlers(providers),
   });
   const disposeCredentials = registerSettingsCredentials(ipcMain, () => window.webContents, settings);
   const activity = new GraphActivity(manager);
@@ -39,6 +85,8 @@ void app.whenReady().then(async () => {
   window.webContents.on('preload-error', (_event, _path, error) => { console.error(error); app.exit(1); });
   try {
     await window.loadURL('data:text/html,<html><body>Workspace integration test</body></html>');
+    await assert.rejects(window.webContents.executeJavaScript("window.synapse.sendCodexMessage('quota test')"), /CODEX_CHAT_QUOTA/);
+    await assert.rejects(window.webContents.executeJavaScript("window.synapse.sendCodexMessage('empty test')"), /CODEX_EMPTY_REPLY/);
     const sourcePath = path.join(root, 'source');
     assert.equal(await window.webContents.executeJavaScript('window.synapse.pickShadowProject()'), null);
     assert.deepEqual(manager.listProjects(), []);
@@ -64,6 +112,9 @@ void app.whenReady().then(async () => {
         status: { executable: process.env.SYNAPSE_TEST_NODE, args: [statusScript] },
         check_cli: { executable: process.env.SYNAPSE_TEST_NODE, args: ['--version'] },
       },
+    }, custom: {
+      display_name: 'Custom Chat', role_description: 'Configured in the test',
+      commands: { chat: { executable: node, args: ['-p', 'require("node:fs").readFileSync(0, "utf8")'] } },
     } }));
     const network = await window.webContents.executeJavaScript(`window.synapse.setDefaultChatAgent('codex')`);
     assert.equal(network.agents[0].fallback_api.api_key_masked, '••••••••');
@@ -133,11 +184,19 @@ void app.whenReady().then(async () => {
       newProjectChat.click();
       await wait(() => sidebar.querySelector('[aria-current="true"]')?.textContent.trim() === 'Cuộc trò chuyện 1', 'selected project chat');
       if (document.body.textContent.includes('Standalone message')) throw new Error('Standalone transcript leaked into project');
+      namedButton('@Agent').click();
+      await wait(() => namedButton('●Custom Chat') || [...document.querySelectorAll('li button')].find(button =>
+        button.lastElementChild?.textContent.trim() === 'Custom Chat'), 'configured agent in the agent menu');
+      const codexOption = await wait(() => [...document.querySelectorAll('li button')].find(button =>
+        button.lastElementChild?.textContent.trim() === 'Codex'), 'Codex in the agent menu');
+      codexOption.click();
+      await wait(() => namedButton('@Codex'), 'selected Codex');
       const textarea = document.querySelector('textarea');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'Project-only message');
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       (await wait(() => { const send = namedButton('Gửi'); return send && !send.disabled && send; }, 'enabled send button')).click();
-      await wait(() => document.body.textContent.includes('Project-only message'), 'saved project message');
+      await wait(() => document.body.textContent.includes('Codex reply to Project-only message'), 'Codex response');
+      if (document.body.textContent.includes('Internal progress')) throw new Error('Codex commentary leaked into the final response');
       namedButton('Cuộc trò chuyện mới', sidebar).click();
       await wait(() => titleIs('Cuộc trò chuyện 2') && !sidebar.querySelector('[aria-label="Tạo chat trong dự án source"]'), 'new standalone chat');
       if (document.body.textContent.includes('Project-only message')) throw new Error('Project transcript leaked into standalone chat');
@@ -150,7 +209,9 @@ void app.whenReady().then(async () => {
     assert.equal(standaloneChats.length, 2);
     const [projectChat] = manager.listSessions(hash);
     assert.equal(manager.listSessions(hash).length, 1);
-    assert.match(JSON.stringify(manager.readSessionMessages(hash, projectChat.session_id)), /Project-only message/);
+    const projectMessages = manager.readSessionMessages(hash, projectChat.session_id) as { authorName: string; text: string }[];
+    assert.deepEqual(projectMessages.map(({ authorName, text }) => [authorName, text]),
+      [['Bạn', 'Project-only message'], ['Codex', 'Codex reply to Project-only message']]);
     await window.loadFile(renderer);
     assert.ok(await window.webContents.executeJavaScript(`(async () => {
       for (let tries = 0; tries < 200; tries++) {

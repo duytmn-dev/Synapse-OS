@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSynapseBridge } from './hooks/useSynapseBridge';
 import type { ChatMessage, TargetAgent, ViewMode } from '../ui/chat/types';
-import { getAgentMeta } from '../ui/agents';
+import type { ChatAgent, ChatTurn } from '../main/ipc';
 import { TopBar } from '../ui/layout/TopBar';
 import { Sidebar } from '../ui/sidebar/Sidebar';
 import { ChatPanel } from '../ui/chat/ChatPanel';
@@ -51,14 +51,16 @@ function isChatMessage(value: unknown): value is ChatMessage {
     typeof message.authorName === 'string' && typeof message.time === 'string' && typeof message.text === 'string';
 }
 
-function geminiHistoryFrom(items: unknown[]) {
+function agentHistoryFrom(items: unknown[]): ChatTurn[] {
   const messages = items.filter(isChatMessage);
   return messages.flatMap((reply, index) => {
     const request = messages[index - 1];
-    return reply.author === 'system' && reply.authorName === 'Gemini' && request?.author === 'user'
-      ? [{ role: 'user', text: request.text.slice(0, 1600) }, { role: 'assistant', text: reply.text.slice(0, 1600) }]
+    const agentId = typeof reply.agentId === 'string' ? reply.agentId :
+      ['Gemini', 'Codex'].includes(reply.authorName) ? reply.authorName.toLowerCase() : undefined;
+    return reply.author === 'system' && agentId && request?.author === 'user'
+      ? [{ agentId, request: request.text.slice(0, 1600), reply: reply.text.slice(0, 1600) }]
       : [];
-  }).slice(-6);
+  }).slice(-24);
 }
 
 export default function App() {
@@ -84,7 +86,6 @@ export default function App() {
     setFallbackOnError,
     setAgentAlertThreshold,
     saveAgentKey,
-    setDefaultChatAgent,
     saveAppearanceSettings,
     ensureToolDependency,
     controlGraphNode,
@@ -100,10 +101,22 @@ export default function App() {
   const sending = useRef(false);
   const [pendingReply, setPendingReply] = useState<{ id: string; message: ChatMessage } | null>(null);
   const [sendPending, setSendPending] = useState(false);
+  const [chatAgents, setChatAgents] = useState<ChatAgent[]>([]);
   const [chatError, setChatError] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
   const openingProject = useRef(false);
   const [projectError, setProjectError] = useState<string | null>(null);
+
+  const refreshChatAgents = useCallback(async () => {
+    if (!window.synapse) return;
+    try {
+      setChatAgents(await window.synapse.getChatAgents());
+    } catch (error) {
+      setChatError(chatErrorMessage(error));
+    }
+  }, []);
+
+  useEffect(() => { void refreshChatAgents(); }, [refreshChatAgents]);
 
   // Chat Popover & Modal state (07 Quản lý chat.svg)
   const [menuTarget, setMenuTarget] = useState<ChatMenuTarget | null>(null);
@@ -222,8 +235,6 @@ export default function App() {
         await saveChatMessages(hash, sessionId, items);
         rememberMessages(sessionId, items);
       };
-      const agent = target === 'auto' ? networkSettings.default_chat_agent_id : target;
-      const isGemini = agent === 'gemini' || agent === 'gemini_antigravity';
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         author: 'user',
@@ -244,22 +255,19 @@ export default function App() {
         text: '',
       };
       const sent = [...previous, userMessage];
-      if (!isGemini) {
-        response.text = agent === 'auto'
-          ? 'Chọn @Gemini để gửi tin nhắn hoặc đặt Gemini làm agent chat mặc định.'
-          : `Luồng gửi tin nhắn cho ${getAgentMeta(agent).label} chưa được nối.`;
-      } else if (files.length) {
-        response.text = 'Luồng chat Gemini hiện hỗ trợ văn bản. Hãy gửi lại tin nhắn không kèm tệp.';
+      if (files.length) {
+        response.text = 'Luồng chat hiện hỗ trợ văn bản. Hãy gửi lại tin nhắn không kèm tệp.';
       } else {
         await persist(sent);
-        setPendingReply({ id: sessionId, message: { ...response, authorName: 'Gemini', text: 'Đang chờ Gemini trả lời…' } });
-        const history = geminiHistoryFrom(previous);
-        const withHistory = `Ngữ cảnh gần đây: ${JSON.stringify(history)}\n\nTin nhắn mới: ${text}`;
+        const label = chatAgents.find((entry) => entry.id === target)?.label;
+        setPendingReply({ id: sessionId, message: { ...response, text: label ? `Đang chờ ${label} trả lời…` : 'Đang chờ AI trả lời…' } });
         try {
-          response.text = await window.synapse.sendGeminiMessage(history.length && withHistory.length <= 32000 ? withHistory : text);
-          response.authorName = 'Gemini';
+          const reply = await window.synapse.sendAgentMessage(target, text, agentHistoryFrom(previous));
+          response.text = reply.text;
+          response.authorName = reply.label;
+          response.agentId = reply.agentId;
         } catch (error) {
-          response.text = `Không gửi được tới Gemini. ${chatErrorMessage(error)}`;
+          response.text = `Không gửi được tin nhắn. ${chatErrorMessage(error)}`;
         }
         response.time = now();
       }
@@ -427,7 +435,8 @@ export default function App() {
           title={active?.title ?? 'Cuộc trò chuyện mới'}
           projectPathSubtitle={currentProject ? `${projectTitle} / Chat dự án` : 'Chat độc lập'}
           messages={messages}
-          connectedAgents={quota}
+          chatAgents={chatAgents}
+          onOpenAgentMenu={refreshChatAgents}
           onSend={handleSend}
           sendDisabled={sendPending || createPending}
           onFocusGraph={currentProject ? () => setMode('graph') : undefined}
@@ -512,7 +521,6 @@ export default function App() {
         onSetFallbackOnError={setFallbackOnError}
         onSetAgentAlertThreshold={setAgentAlertThreshold}
         onSaveAgentKey={saveAgentKey}
-        onSetDefaultChatAgent={setDefaultChatAgent}
         onSaveAppearanceSettings={saveAppearanceSettings}
         onEnsureToolDependency={ensureToolDependency}
       />

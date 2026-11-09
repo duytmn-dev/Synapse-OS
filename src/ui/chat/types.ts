@@ -22,6 +22,7 @@ export interface ChatMessage {
   id: string;
   author: 'user' | 'system';
   authorName: string;
+  agentId?: string;
   time: string;
   text: string;
   attachments?: ChatAttachment[];

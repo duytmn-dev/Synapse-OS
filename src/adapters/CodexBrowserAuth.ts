@@ -11,26 +11,31 @@ type ObjectValue = Record<string, unknown>;
 const object = (value: unknown): ObjectValue => value && typeof value === 'object' && !Array.isArray(value)
   ? value as ObjectValue : {};
 type Action = 'CONNECT' | 'DISCONNECT' | 'REFRESH' | 'CHECK_CLI';
+interface CodexClient {
+  request(method: string, params?: ObjectValue): Promise<ObjectValue>;
+  waitFor(predicate: () => boolean, deadline: number): Promise<void>;
+  onNotification(callback: (method: string, params: ObjectValue) => void): void;
+}
 
 export class CodexBrowserAuth {
   constructor(private readonly userData: string, private readonly openBrowser: (url: string) => Promise<void>,
     private readonly command?: readonly [string, ...string[]]) {}
 
-  async action(action: Action): Promise<ProviderStatus> {
-    if (this.command) return this.run(action, this.command);
+  private async withClient<T>(run: (client: CodexClient) => Promise<T>): Promise<T> {
+    if (this.command) return this.run(run, this.command);
     const override = process.env.SYNAPSE_CODEX_EXECUTABLE?.trim();
-    if (override) return this.run(action, [override]);
+    if (override) return this.run(run, [override]);
     try {
-      return await this.run(action, [process.platform === 'win32' ? 'codex.exe' : 'codex']);
+      return await this.run(run, [process.platform === 'win32' ? 'codex.exe' : 'codex']);
     } catch (error) {
       if (!(error instanceof WorkspaceError) || error.code !== 'CODEX_CLI_NOT_FOUND') throw error;
       const desktop = await findWindowsDesktopCodex();
       if (!desktop) throw error;
-      return this.run(action, [desktop]);
+      return this.run(run, [desktop]);
     }
   }
 
-  private async run(action: Action, command: readonly [string, ...string[]]): Promise<ProviderStatus> {
+  private async run<T>(run: (client: CodexClient) => Promise<T>, command: readonly [string, ...string[]]): Promise<T> {
     const [executable, ...prefix] = command;
     if (/\.(cmd|bat)$/i.test(executable)) throw new WorkspaceError('CODEX_CLI_NOT_FOUND', 'Chỉ định tệp thực thi Codex, ví dụ codex.exe.');
     const codexHome = path.join(this.userData, 'codex-account');
@@ -46,7 +51,7 @@ export class CodexBrowserAuth {
     let nextId = 0;
     let failed: WorkspaceError | undefined;
     const pending = new Map<number, (message: ObjectValue) => void>();
-    const notifications = new Map<string, boolean>();
+    let onNotification: ((method: string, params: ObjectValue) => void) | undefined;
     const terminate = (error: WorkspaceError) => {
       failed ??= error;
       for (const resolve of pending.values()) resolve({});
@@ -72,10 +77,12 @@ export class CodexBrowserAuth {
         try {
           const message = object(JSON.parse(line));
           if (typeof message.id === 'number' && !message.method) pending.get(message.id)?.(message);
-          const params = object(message.params);
-          if (message.method === 'account/login/completed' && typeof params.loginId === 'string' && typeof params.success === 'boolean') {
-            if (notifications.size >= 8) notifications.clear();
-            notifications.set(params.loginId, params.success);
+          if (typeof message.method === 'string') {
+            if (typeof message.id === 'number' || typeof message.id === 'string') {
+              child.stdin.write(JSON.stringify({ id: message.id, error: { code: -32601, message: 'Client request unavailable' } }) + '\n');
+            } else {
+              onNotification?.(message.method, object(message.params));
+            }
           }
         } catch { /* Ignore non-protocol output. The request still has a deadline. */ }
       }
@@ -98,7 +105,31 @@ export class CodexBrowserAuth {
     try {
       await request('initialize', { clientInfo: { name: 'synapse_os', title: 'Synapse OS', version: '0.0.1' } });
       child.stdin.write('{"method":"initialized"}\n');
+      return await run({
+        request,
+        async waitFor(predicate, deadline) {
+          while (!predicate() && !failed && Date.now() < deadline) await delay(100);
+          if (!predicate() && failed) throw failed;
+        },
+        onNotification(callback) { onNotification = callback; },
+      });
+    } finally {
+      child.stdin.end();
+      const forceClose = setTimeout(() => child.kill(), 500);
+      try { await closed; } finally { clearTimeout(forceClose); }
+    }
+  }
+
+  async action(action: Action): Promise<ProviderStatus> {
+    return this.withClient(async ({ request, waitFor, onNotification }) => {
       if (action === 'CONNECT') {
+        const notifications = new Map<string, boolean>();
+        onNotification((method, params) => {
+          if (method === 'account/login/completed' && typeof params.loginId === 'string' && typeof params.success === 'boolean') {
+            if (notifications.size >= 8) notifications.clear();
+            notifications.set(params.loginId, params.success);
+          }
+        });
         const login = await request('account/login/start', { type: 'chatgpt' });
         const { loginId, authUrl } = login;
         const url = typeof authUrl === 'string' ? URL.parse(authUrl) : null;
@@ -108,14 +139,12 @@ export class CodexBrowserAuth {
         }
         try {
           await this.openBrowser(url.href);
-          const deadline = Date.now() + 4 * 60_000;
-          while (!notifications.has(loginId) && !failed && Date.now() < deadline) await delay(100);
-          if (failed) throw failed;
+          await waitFor(() => notifications.has(loginId), Date.now() + 4 * 60_000);
           if (notifications.get(loginId) !== true) {
             throw new WorkspaceError('CODEX_LOGIN_INCOMPLETE', 'Chưa xác thực được tài khoản ChatGPT. Hãy bấm Kết nối để thử lại.');
           }
         } catch (error) {
-          if (!failed && !notifications.has(loginId)) await request('account/login/cancel', { loginId }).catch(() => {});
+          if (!notifications.has(loginId)) await request('account/login/cancel', { loginId }).catch(() => {});
           throw error instanceof WorkspaceError ? error : new WorkspaceError('CODEX_BROWSER_OPEN_FAILED', 'Không mở được trình duyệt mặc định.');
         }
       } else if (action === 'DISCONNECT') {
@@ -143,10 +172,64 @@ export class CodexBrowserAuth {
         account_hint: connected ? maskProviderEmail(identity.email) : undefined,
         account_plan: connected ? providerLabel(identity.planType) : undefined,
       };
-    } finally {
-      child.stdin.end();
-      const forceClose = setTimeout(() => child.kill(), 500);
-      try { await closed; } finally { clearTimeout(forceClose); }
+    });
+  }
+
+  async sendMessage(message: string): Promise<string> {
+    if (typeof message !== 'string' || !message.trim() || message.length > 32_000) {
+      throw new WorkspaceError('INVALID_ARGUMENT', 'Tin nhắn Codex phải có từ 1 đến 32.000 ký tự.');
     }
+    return this.withClient(async ({ request, waitFor, onNotification }) => {
+      const account = await request('account/read', { refreshToken: false });
+      if (!('account' in account)) throw new WorkspaceError('CODEX_PROTOCOL_ERROR', 'Thiếu trạng thái tài khoản Codex.');
+      if (object(account.account).type !== 'chatgpt') {
+        throw new WorkspaceError('CODEX_NOT_CONNECTED', 'Hãy đăng nhập Codex bằng ChatGPT trong Cài đặt.');
+      }
+      const cwd = path.join(this.userData, 'codex-chat');
+      await mkdir(cwd, { recursive: true, mode: 0o700 });
+      const started = await request('thread/start', { cwd, ephemeral: true, sandbox: 'read-only', approvalPolicy: 'never' });
+      const threadId = object(started.thread).id;
+      if (typeof threadId !== 'string' || !threadId) throw new WorkspaceError('CODEX_PROTOCOL_ERROR', 'Thiếu mã phiên Codex.');
+
+      let observedTurn: string | undefined;
+      let completed: ObjectValue | undefined;
+      let finalReply = '';
+      let unclassifiedReply = '';
+      onNotification((method, params) => {
+        if (params.threadId !== threadId) return;
+        const turn = object(params.turn);
+        const id = method === 'turn/completed' ? turn.id : params.turnId;
+        if (typeof id !== 'string' || (observedTurn && observedTurn !== id)) return;
+        if (method === 'turn/completed') {
+          observedTurn = id;
+          completed = turn;
+        } else if (method === 'item/completed') {
+          const item = object(params.item);
+          if (item.type !== 'agentMessage' || typeof item.text !== 'string' || !item.text.trim()) return;
+          observedTurn = id;
+          if (item.phase === 'final_answer') finalReply = item.text.trim();
+          if (item.phase == null) unclassifiedReply = item.text.trim();
+        }
+      });
+
+      const turn = await request('turn/start', {
+        threadId, input: [{ type: 'text', text: message }], approvalPolicy: 'never',
+        sandboxPolicy: { type: 'readOnly' },
+      });
+      const turnId = object(turn.turn).id;
+      if (typeof turnId !== 'string' || !turnId) throw new WorkspaceError('CODEX_PROTOCOL_ERROR', 'Thiếu mã lượt trả lời Codex.');
+      await waitFor(() => completed !== undefined, Date.now() + 120_000);
+      if (!completed) throw new WorkspaceError('CODEX_CHAT_TIMEOUT', 'Codex chưa trả lời sau 2 phút.');
+      if (observedTurn !== turnId) throw new WorkspaceError('CODEX_PROTOCOL_ERROR', 'Codex trả về lượt chat không khớp.');
+      if (completed.status !== 'completed') {
+        if (object(completed.error).codexErrorInfo === 'usageLimitExceeded') {
+          throw new WorkspaceError('CODEX_CHAT_QUOTA', 'Tài khoản Codex đã hết hạn mức.');
+        }
+        throw new WorkspaceError('CODEX_CHAT_FAILED', 'Codex không hoàn tất lượt chat.');
+      }
+      const reply = finalReply || unclassifiedReply;
+      if (!reply) throw new WorkspaceError('CODEX_EMPTY_REPLY', 'Codex hoàn tất lượt chat nhưng không gửi văn bản.');
+      return reply;
+    });
   }
 }

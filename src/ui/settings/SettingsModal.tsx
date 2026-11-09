@@ -40,7 +40,6 @@ interface SettingsModalProps {
   onSetFallbackOnError?: (agentId: AgentId, enabled: boolean) => Promise<AgentSettingsProfile>;
   onSetAgentAlertThreshold?: (agentId: AgentId, percent: number) => Promise<AgentSettingsProfile>;
   onSaveAgentKey?: (agentId: AgentId, key: string) => Promise<void>;
-  onSetDefaultChatAgent?: (agentId: string) => Promise<AINetworkSettings>;
   onEnsureToolDependency?: (toolId: ToolDependencyStatus['tool_id']) => Promise<ToolDependencyStatus>;
 }
 
@@ -58,7 +57,6 @@ export function SettingsModal(props: SettingsModalProps) {
     onSetFallbackOnError,
     onSetAgentAlertThreshold,
     onSaveAgentKey,
-    onSetDefaultChatAgent,
     onEnsureToolDependency,
   } = props;
 
@@ -289,7 +287,7 @@ export function SettingsModal(props: SettingsModalProps) {
                     Quản lý nền tảng & hạn mức
                   </h3>
                   <p className="text-[12px] text-[#8297B2]">
-                    Kết nối agent, chọn cấu hình mặc định và đặt phương án dự phòng.
+                    Kết nối agent và quản lý API key.
                   </p>
                 </div>
 
@@ -304,26 +302,12 @@ export function SettingsModal(props: SettingsModalProps) {
                         Agent xử lý chat mặc định
                       </span>
                       <span className="text-[11.5px] text-[#8297B2]">
-                        Áp dụng khi ở chế độ Chỉ chat.
+                        Chọn @Agent trong ô chat để chỉ định một AI khác.
                       </span>
                     </div>
                   </div>
 
-                  <select
-                    value={networkSettings.default_chat_agent_id === 'gemini_antigravity' ? 'gemini' : networkSettings.default_chat_agent_id}
-                    onChange={(e) => {
-                      if (onSetDefaultChatAgent) {
-                        onSetDefaultChatAgent(e.target.value);
-                      }
-                      showNotice(`Đã chuyển Agent chat mặc định sang ${e.target.value}.`);
-                    }}
-                    className="h-8 rounded-[6px] border border-[#405672] bg-[#142235] px-3 text-[12px] font-medium text-[#EAF2FF] focus:border-[#58E9A8] focus:outline-none"
-                  >
-                    <option value="gemini">Gemini · Antigravity</option>
-                    <option value="chatgpt">ChatGPT · Điều phối</option>
-                    <option value="claude">Claude · Agent công ty</option>
-                    <option value="codex">Codex · CLI</option>
-                  </select>
+                  <span className="text-[12px] font-medium text-[#EAF2FF]">Gemini → ChatGPT</span>
                 </div>
 
                 {/* Status legend */}
@@ -393,6 +377,11 @@ export function SettingsModal(props: SettingsModalProps) {
                                   5h {agent.quota_5h_percent === null ? '—' : `${agent.quota_5h_percent}%`} · Tuần {agent.quota_week_percent === null ? '—' : `${agent.quota_week_percent}%`}
                                 </span>
                               </div>
+                              {agent.agent_id === 'claude' && (
+                                <span className="text-[11.5px] text-[#8297B2]">
+                                  Chat trong Synapse OS dùng API key Anthropic bên dưới.
+                                </span>
+                              )}
                               {isConnected && (
                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[#8297B2]">
                                   {agent.account_hint && <span>Tài khoản {agent.account_hint}</span>}

@@ -49,7 +49,7 @@ export class SettingsService {
   async network(): Promise<AINetworkSettings> {
     const configs = await this.providers.configurations();
     const defaultAgent = (await this.settings.read()).defaultAgent ??
-      (configs.codex && !('commands' in configs.codex) ? 'codex' : undefined);
+      (configs.gemini ? 'gemini' : configs.chatgpt ? 'chatgpt' : configs.codex && !('commands' in configs.codex) ? 'codex' : undefined);
     if (!defaultAgent || !configs[defaultAgent]) throw new WorkspaceError('DEFAULT_AGENT_NOT_CONFIGURED', 'Select a configured default chat agent');
     const agents = await Promise.all((Object.keys(configs) as AgentId[]).map(async (agent) => {
       try { return await this.profile(agent); }

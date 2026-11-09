@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { AgentQuotaStat } from '@shared/types';
+import type { ChatAgent } from '../../main/ipc';
 import type { ChatMessage, TargetAgent } from './types';
 import { CodeBlock } from './CodeBlock';
 import { MediaPreview } from './MediaPreview';
@@ -10,7 +10,8 @@ interface ChatPanelProps {
   title: string;
   projectPathSubtitle?: string;
   messages: ChatMessage[];
-  connectedAgents: AgentQuotaStat[];
+  chatAgents: ChatAgent[];
+  onOpenAgentMenu: () => void;
   onSend: (text: string, target: TargetAgent, files: File[]) => void;
   sendDisabled?: boolean;
   onFocusGraph?: () => void;
@@ -22,7 +23,8 @@ export function ChatPanel({
   title,
   projectPathSubtitle = 'Video 360 Highlights / Chat dự án',
   messages,
-  connectedAgents,
+  chatAgents,
+  onOpenAgentMenu,
   onSend,
   sendDisabled,
   onFocusGraph,
@@ -153,7 +155,7 @@ export function ChatPanel({
 
       {/* Footer Smart Input Bar (01 Dashboard.svg) */}
       <footer className="shrink-0 p-4 pt-1">
-        <SmartInputBar onSend={onSend} agents={connectedAgents} sendDisabled={sendDisabled} />
+        <SmartInputBar onSend={onSend} agents={chatAgents} onOpenAgentMenu={onOpenAgentMenu} sendDisabled={sendDisabled} />
       </footer>
     </section>
   );

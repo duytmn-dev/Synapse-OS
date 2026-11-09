@@ -25,11 +25,12 @@ model-group quotas, run `/usage` in Antigravity CLI.
 
 For custom providers, put `agent-providers.json` in Electron `userData`
 (`%APPDATA%/SynapseOS` on Windows).
-It is a JSON object keyed by canonical `codex`, `gemini`, `chatgpt`, or `claude` IDs.
+It is a JSON object keyed by provider ID. Account and quota settings recognize the
+canonical `codex`, `gemini`, `chatgpt`, and `claude` IDs.
 Each entry contains `display_name`, `role_description`, and `commands`. A command
 contains an absolute native `executable` path, an optional string-array `args`, and
-optional `timeoutMs`. `commands.status` is required; `check_cli`, `connect`, and
-`disconnect` are optional. Commands run in userData, never the source directory.
+optional `timeoutMs`. For built-in IDs, `commands.status` is required; `check_cli`,
+`connect`, `disconnect`, and `chat` are optional.
 This configuration is backend-only; renderer IPC cannot supply executables.
 
 The status executable/wrapper must query its actual provider session and emit one
@@ -39,7 +40,30 @@ optional actual `worker_model_name`. Missing quota rejects with `QUOTA_UNAVAILAB
 missing configuration rejects with `PROVIDER_NOT_CONFIGURED`. Do not use sample
 numbers or infer authentication from a version command's success. A wrapper without
 quota access must report failure rather than fabricate a complete status profile.
-Select the default chat agent through `setDefaultChatAgent` after configuration.
+To add a provider to the `@Agent` menu, use a new ID with `commands.chat`.
+The wrapper reads a UTF-8 prompt from stdin, authenticates with its provider,
+writes only the reply to stdout and exits with a nonzero status on failure.
+Synapse OS runs the wrapper from its own userData subdirectory.
+
+```json
+{
+  "my-agent": {
+    "display_name": "My Agent",
+    "role_description": "Text chat",
+    "commands": {
+      "chat": {
+        "executable": "C:/Tools/my-agent-chat.exe",
+        "args": []
+      }
+    }
+  }
+}
+```
+
+Automatic chat tries Gemini first, then ChatGPT. Explicit `@Agent` selection
+routes the message only to the selected provider. ChatGPT uses the linked Codex
+account. Claude uses the Anthropic key saved in Settings and defaults to
+`claude-sonnet-5-5`; set `SYNAPSE_CLAUDE_MODEL` to use another available model.
 
 Keys are saved through `saveAgentKey` and checked through
 `agentConnectionAction(agent, 'CHECK_API')`. The fixed, redirect-disabled probes
