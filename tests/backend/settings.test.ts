@@ -39,8 +39,9 @@ test('ChatGPT reuses Codex login and can unlink without logging out Codex', asyn
   } });
   const linked = await auth.action('CONNECT');
   assert.equal(linked.connection_status, 'CONNECTED');
-  assert.equal(linked.quota_5h_percent, null);
-  assert.equal(linked.quota_week_percent, null);
+  assert.equal(linked.quota_shared_with, 'codex');
+  assert.equal(linked.quota_5h_percent, 0);
+  assert.equal(linked.quota_week_percent, 24);
   assert.equal((await auth.action('DISCONNECT')).connection_status, 'DISCONNECTED');
   assert.equal((await auth.action('CHECK_CLI')).connection_status, 'DISCONNECTED');
   assert.deepEqual(calls, ['CHECK_CLI']);
@@ -66,16 +67,22 @@ test('Claude login and logout require verified CLI status and never invent quota
   const connected = await auth.action('CONNECT');
   assert.equal(connected.connection_status, 'CONNECTED');
   assert.equal(connected.quota_5h_percent, null);
+  assert.equal(connected.account_hint, 'h•••@example.invalid');
   assert.doesNotMatch(JSON.stringify(connected), /hidden@example/);
   assert.equal((await auth.action('DISCONNECT')).connection_status, 'DISCONNECTED');
   assert.deepEqual(calls, ['login', 'status', 'logout', 'status']);
 });
 
-test('Antigravity ACP negotiates browser auth and checks the resulting session', async (t) => {
+test('Antigravity ACP verifies login, reads advertised quota and returns chat replies', async (t) => {
   const root = fixture(t);
   const script = path.join(root, 'agy-fixture.cjs');
+  const marker = path.join(root, 'signed-in');
   writeFileSync(script, `
-    let signedIn = false;
+    const fs = require('node:fs');
+    const marker = process.argv[2];
+    const update = (sessionId, update) => console.log(JSON.stringify({
+      jsonrpc: '2.0', method: 'session/update', params: { sessionId, update }
+    }));
     require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
       const { id, method, params } = JSON.parse(line);
       let result;
@@ -84,25 +91,48 @@ test('Antigravity ACP negotiates browser auth and checks the resulting session',
         result = { protocolVersion: 1, authMethods: [{ id: 'oauth-personal' }], agentCapabilities: { auth: { logout: {} } } };
       } else if (method === 'authenticate') {
         if (params.methodId !== 'oauth-personal') process.exit(3);
-        signedIn = true;
+        fs.writeFileSync(marker, 'signed-in');
         result = {};
       } else if (method === 'logout') {
-        signedIn = false;
+        fs.rmSync(marker, { force: true });
         result = {};
-      } else if (method === 'session/new' && signedIn) {
+      } else if (method === 'session/new' && fs.existsSync(marker)) {
         if (params.mcpServers.length !== 0) process.exit(4);
-        result = { sessionId: 'test-session' };
+        if (!fs.existsSync(marker + '.no-usage')) update('test-session',
+          { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'usage' }] });
+        result = { sessionId: 'test-session', configOptions: [
+          { category: 'model', type: 'select', currentValue: 'test-model', options: [
+            { group: 'default', options: [{ value: 'test-model', name: 'Test Model' }] }
+          ] }
+        ], _meta: { antigravity: { tier: { name: 'Test Plan' } } } };
+      } else if (method === 'session/prompt') {
+        const text = params.prompt[0].text;
+        fs.appendFileSync(marker + '.prompts', text + '\\n');
+        if (text !== '/usage' && !process.argv.includes('--sandbox')) process.exit(5);
+        update('another-session', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ignore me' } });
+        update(params.sessionId, { sessionUpdate: 'agent_message_chunk', content: {
+          type: 'text', text: text === '/usage' ? 'Gemini weekly: 62% remaining' : 'Gemini response.'
+        } });
+        result = { stopReason: 'end_turn' };
       }
       console.log(JSON.stringify(result
         ? { jsonrpc: '2.0', id, result }
         : { jsonrpc: '2.0', id, error: { code: -32000, message: 'Authentication required' } }));
     });
   `);
-  const auth = new AntigravityBrowserAuth(root, [process.execPath, script]);
+  const auth = new AntigravityBrowserAuth(root, [process.execPath, script, marker]);
   assert.equal((await auth.action('CHECK_CLI')).connection_status, 'DISCONNECTED');
+  await assert.rejects(auth.sendMessage('Hello'), /AGY_AUTH_REQUIRED/);
   const connected = await auth.action('CONNECT');
   assert.equal(connected.connection_status, 'CONNECTED');
   assert.equal(connected.quota_week_percent, null);
+  assert.equal(connected.worker_model_name, 'Test Model');
+  assert.equal(connected.account_plan, 'Test Plan');
+  assert.equal((await auth.action('REFRESH')).quota_report, 'Gemini weekly: 62% remaining');
+  assert.equal(await auth.sendMessage('Xin chào'), 'Gemini response.');
+  writeFileSync(marker + '.no-usage', '');
+  assert.equal((await auth.action('REFRESH')).quota_report, undefined);
+  assert.equal((readFileSync(marker + '.prompts', 'utf8').match(/^\/usage$/gm) ?? []).length, 1);
   assert.equal((await auth.action('DISCONNECT')).connection_status, 'DISCONNECTED');
 });
 
@@ -138,7 +168,7 @@ test('built-in Codex uses browser OAuth without provider config and reads actual
         if (params.type !== 'chatgpt') process.exit(2);
         result = { type: 'chatgpt', loginId: 'test', authUrl: 'https://auth.openai.com/oauth/authorize' };
       } else if (method === 'account/read') {
-        result = { account: fs.existsSync(session) ? { type: 'chatgpt', email: 'private@example.invalid' } : null };
+        result = { account: fs.existsSync(session) ? { type: 'chatgpt', email: 'private@example.invalid', planType: 'plus' } : null };
       } else if (method === 'account/rateLimits/read') {
         result = { rateLimits: { primary: { windowDurationMins: 15, usedPercent: 99 }, secondary: { windowDurationMins: 10080, usedPercent: 27 } } };
       } else if (method === 'account/logout') {
@@ -167,6 +197,8 @@ test('built-in Codex uses browser OAuth without provider config and reads actual
   assert.equal(profile.connection_status, 'CONNECTED');
   assert.equal(profile.quota_5h_percent, null);
   assert.equal(profile.quota_week_percent, 27);
+  assert.equal(profile.account_hint, 'p•••@example.invalid');
+  assert.equal(profile.account_plan, 'plus');
   assert.doesNotMatch(JSON.stringify(profile), /private@example/);
   assert.equal((await service.action('codex', 'REFRESH')).connection_status, 'CONNECTED');
   assert.equal((await service.action('codex', 'DISCONNECT')).connection_status, 'DISCONNECTED');

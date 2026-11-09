@@ -11,8 +11,8 @@ This connection uses `userData/codex-account` as its Codex home and requires
 Codex's OS credential store. Unknown quotas are shown as a dash. A custom
 `codex` entry overrides the built-in connection.
 
-The ChatGPT card links to the built-in Codex ChatGPT session and does not
-duplicate Codex quota. Disconnect on that card removes the Synapse OS link.
+The ChatGPT card links to the built-in Codex ChatGPT session and labels the
+displayed quota as shared with Codex. Disconnect removes the Synapse OS link.
 Claude uses native Claude Code (`claude auth login/status/logout`) with
 `CLAUDE_CONFIG_DIR` under Synapse userData. Gemini uses the native Antigravity
 CLI (`agy acp`) and its advertised Google browser sign-in. Install the respective
@@ -20,6 +20,8 @@ official CLI first. Override native executable discovery with
 `SYNAPSE_CLAUDE_EXECUTABLE` or `SYNAPSE_AGY_EXECUTABLE` if needed.
 Google authentication uses the CLI's existing cached session and may require
 `/logout` in its terminal if the installed ACP version has no logout capability.
+ACP supplies the selected model when the provider advertises it. For Gemini
+model-group quotas, run `/usage` in Antigravity CLI.
 
 For custom providers, put `agent-providers.json` in Electron `userData`
 (`%APPDATA%/SynapseOS` on Windows).

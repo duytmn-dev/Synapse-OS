@@ -5,7 +5,18 @@ import { runCLI, type AgentCLIConfig } from './CLIAdapter.ts';
 import { requiredText, WorkspaceError } from '../core/workspace/WorkspacePaths.ts';
 import { validateAgent } from '../core/concurrency/FileLockManager.ts';
 
-export type ProviderStatus = Pick<AgentSettingsProfile, 'connection_status' | 'auth_method' | 'quota_5h_percent' | 'quota_week_percent'> & { worker_model_name?: string };
+export type ProviderStatus = Pick<AgentSettingsProfile, 'connection_status' | 'auth_method' |
+  'quota_5h_percent' | 'quota_week_percent' | 'account_hint' | 'account_plan' | 'worker_model_name' | 'quota_shared_with' | 'quota_report'>;
+export function providerLabel(value: unknown): string | undefined {
+  if (typeof value !== 'string' || /[\x00-\x1f\x7f]/.test(value)) return;
+  const label = value.trim();
+  return label && label.length <= 160 ? label : undefined;
+}
+export function maskProviderEmail(value: unknown): string | undefined {
+  const email = providerLabel(value);
+  const match = email?.match(/^([^\s@]+)@([a-z\d.-]+\.[a-z\d-]+)$/i);
+  return match ? `${Array.from(match[1])[0]}•••@${match[2]}` : undefined;
+}
 export type ProviderAction = 'CONNECT' | 'DISCONNECT' | 'REFRESH' | 'CHECK_CLI';
 export interface ProviderConfig {
   display_name: string;

@@ -19,7 +19,6 @@ export class ChatGPTViaCodexAuth implements BrowserAuth {
       if (status.connection_status !== 'DISCONNECTED') await this.settings.setChatGPTLinked(true);
     }
     if (status.connection_status === 'DISCONNECTED') return disconnected;
-    // Codex quota belongs to the Codex row. A linked account supplies no independent ChatGPT quota.
-    return { ...status, auth_method: 'ChatGPT · Tài khoản Codex', quota_5h_percent: null, quota_week_percent: null };
+    return { ...status, auth_method: 'ChatGPT · Tài khoản Codex', quota_shared_with: 'codex' };
   }
 }

@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { CLIError, runCLI, type CLIRunner } from './CLIAdapter.ts';
 import { WorkspaceError } from '../core/workspace/WorkspacePaths.ts';
-import type { ProviderAction, ProviderStatus } from './ProviderRegistry.ts';
+import { maskProviderEmail, providerLabel, type ProviderAction, type ProviderStatus } from './ProviderRegistry.ts';
 
 export class ClaudeBrowserAuth {
   constructor(private readonly userData: string, private readonly runner: CLIRunner = runCLI) {}
@@ -33,7 +33,7 @@ export class ClaudeBrowserAuth {
     if (action === 'CONNECT') await run('login');
     if (action === 'DISCONNECT') await run('logout');
     const result = await run('status');
-    let status: { loggedIn?: boolean; authMethod?: string };
+    let status: { loggedIn?: boolean; authMethod?: string; email?: unknown; subscriptionType?: unknown };
     try { status = JSON.parse(result.stdout); }
     catch { throw new WorkspaceError('CLAUDE_STATUS_INVALID', 'Claude Code không trả về trạng thái JSON.'); }
     if (!status || typeof status.loggedIn !== 'boolean') throw new WorkspaceError('CLAUDE_STATUS_INVALID', 'Thiếu trạng thái đăng nhập Claude Code.');
@@ -41,6 +41,8 @@ export class ClaudeBrowserAuth {
     if (action === 'CONNECT' && !connected) throw new WorkspaceError('CLAUDE_AUTH_FAILED', 'Claude Code chưa xác nhận tài khoản Claude.');
     if (action === 'DISCONNECT' && status.loggedIn) throw new WorkspaceError('CLAUDE_AUTH_FAILED', 'Claude Code chưa xác nhận đăng xuất.');
     return { connection_status: connected ? 'CONNECTED' : 'DISCONNECTED',
-      auth_method: connected ? 'Claude · OAuth' : 'Chưa đăng nhập Claude', quota_5h_percent: null, quota_week_percent: null };
+      auth_method: connected ? 'Claude · OAuth' : 'Chưa đăng nhập Claude', quota_5h_percent: null, quota_week_percent: null,
+      account_hint: connected ? maskProviderEmail(status.email) : undefined,
+      account_plan: connected ? providerLabel(status.subscriptionType) : undefined };
   }
 }

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { setTimeout as delay } from 'node:timers/promises';
 import { WorkspaceError } from '../core/workspace/WorkspacePaths.ts';
-import type { ProviderStatus } from './ProviderRegistry.ts';
+import { maskProviderEmail, providerLabel, type ProviderStatus } from './ProviderRegistry.ts';
 import { findWindowsDesktopCodex } from './WindowsCodexDiscovery.ts';
 
 type ObjectValue = Record<string, unknown>;
@@ -123,7 +123,8 @@ export class CodexBrowserAuth {
       }
       const account = await request('account/read', { refreshToken: action === 'REFRESH' });
       if (!('account' in account)) throw new WorkspaceError('CODEX_PROTOCOL_ERROR', 'Thiếu trạng thái tài khoản Codex.');
-      const connected = object(account.account).type === 'chatgpt';
+      const identity = object(account.account);
+      const connected = identity.type === 'chatgpt';
       if (action === 'CONNECT' && !connected) throw new WorkspaceError('CODEX_LOGIN_INCOMPLETE', 'Codex chưa xác nhận phiên ChatGPT.');
       const limits = connected ? await request('account/rateLimits/read').catch(() => ({} as ObjectValue)) : {};
       const bucket = object(object(limits.rateLimitsByLimitId).codex ?? limits.rateLimits);
@@ -139,6 +140,8 @@ export class CodexBrowserAuth {
         auth_method: connected ? 'ChatGPT · OAuth' : 'Chưa đăng nhập ChatGPT',
         quota_5h_percent: fiveHours,
         quota_week_percent: week,
+        account_hint: connected ? maskProviderEmail(identity.email) : undefined,
+        account_plan: connected ? providerLabel(identity.planType) : undefined,
       };
     } finally {
       child.stdin.end();

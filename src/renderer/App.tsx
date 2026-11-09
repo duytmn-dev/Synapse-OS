@@ -8,7 +8,34 @@ import { ChatPanel } from '../ui/chat/ChatPanel';
 import { KnowledgeGraphPanel } from '../ui/graph/KnowledgeGraphPanel';
 import { TaskTree } from '../ui/tasks/TaskTree';
 import { ChatManagementModals, type ChatMenuTarget } from '../ui/chat/ChatManagementModals';
+import { ProjectManagementModals, type ProjectMenuTarget } from '../ui/sidebar/ProjectManagementModals';
 import { SettingsModal } from '../ui/settings/SettingsModal';
+import type { ShadowProjectMeta } from '@shared/types';
+
+interface ProjectCustomOverride {
+  customName?: string;
+  isPinned?: boolean;
+  isDeleted?: boolean;
+}
+
+const PROJECT_OVERRIDES_STORAGE_KEY = 'synapse_project_overrides_v1';
+
+const loadProjectOverrides = (): Record<string, ProjectCustomOverride> => {
+  try {
+    const raw = localStorage.getItem(PROJECT_OVERRIDES_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveProjectOverrides = (overrides: Record<string, ProjectCustomOverride>) => {
+  try {
+    localStorage.setItem(PROJECT_OVERRIDES_STORAGE_KEY, JSON.stringify(overrides));
+  } catch (e) {
+    console.warn('Failed to save project overrides', e);
+  }
+};
 
 const now = () => new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
@@ -44,6 +71,8 @@ export default function App() {
   const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string>('');
   const [threads, setThreads] = useState<Record<string, ChatMessage[]>>({});
+  const geminiPending = useRef(false);
+  const geminiHistory = useRef(new Map<string, { role: 'user' | 'assistant'; text: string }[]>());
   const [highlight, setHighlight] = useState<string | null>(null);
   const openingProject = useRef(false);
   const [projectError, setProjectError] = useState<string | null>(null);
@@ -52,6 +81,26 @@ export default function App() {
   const [menuTarget, setMenuTarget] = useState<ChatMenuTarget | null>(null);
   const [renameTarget, setRenameTarget] = useState<ChatMenuTarget | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ChatMenuTarget | null>(null);
+
+  // Project Overrides & Modals state
+  const [projectOverrides, setProjectOverrides] = useState<Record<string, ProjectCustomOverride>>(loadProjectOverrides);
+  const [projectMenuTarget, setProjectMenuTarget] = useState<ProjectMenuTarget | null>(null);
+  const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectMenuTarget | null>(null);
+  const [projectDeleteTarget, setProjectDeleteTarget] = useState<ProjectMenuTarget | null>(null);
+
+  // Danh sách dự án kết hợp với các tùy chỉnh (đổi tên, ghim, ẩn dự án đã xóa)
+  const effectiveProjects: ShadowProjectMeta[] = useMemo(() => {
+    return shadowProjects
+      .filter((p) => !projectOverrides[p.project_hash]?.isDeleted)
+      .map((p) => {
+        const override = projectOverrides[p.project_hash];
+        return {
+          ...p,
+          project_name: override?.customName || p.project_name,
+          is_pinned: override?.isPinned ?? p.is_pinned ?? false,
+        };
+      });
+  }, [shadowProjects, projectOverrides]);
 
   // Settings State (02 & 03 Cài đặt.svg)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -87,10 +136,11 @@ export default function App() {
     title: 'Cuộc trò chuyện mới',
   };
 
-  const currentProject = shadowProjects.find((p) => p.project_hash === activeProjectHash);
+  const currentProject = effectiveProjects.find((p) => p.project_hash === activeProjectHash);
   const projectTitle = currentProject?.project_name ?? (graphData?.project_hash ? 'Synapse OS' : 'Chưa mở dự án');
 
-  const messages = threads[activeId] ?? [
+  const threadId = activeId || activeProjectHash || 'default';
+  const messages = threads[threadId] ?? [
     {
       id: 'welcome',
       author: 'system',
@@ -101,8 +151,9 @@ export default function App() {
   ];
 
   const handleSend = useCallback(
-    (text: string, target: TargetAgent, files: File[]) => {
-      const currentActiveId = activeId || 'default';
+    async (text: string, target: TargetAgent, files: File[]) => {
+      const agent = target === 'auto' ? networkSettings.default_chat_agent_id : target;
+      const isGemini = agent === 'gemini' || agent === 'gemini_antigravity';
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         author: 'user',
@@ -115,19 +166,49 @@ export default function App() {
           kind: f.type.startsWith('video') ? 'video' : 'file',
         })),
       };
-      const ack: ChatMessage = {
+      const unavailable = !isGemini ? (agent === 'auto'
+        ? 'Chọn @Gemini để gửi tin nhắn hoặc đặt Gemini làm agent chat mặc định.'
+        : `Luồng gửi tin nhắn cho ${getAgentMeta(agent).label} chưa được nối.`)
+        : files.length ? 'Luồng chat Gemini hiện hỗ trợ văn bản. Hãy gửi lại tin nhắn không kèm tệp.'
+        : geminiPending.current ? 'Gemini đang xử lý một tin nhắn khác. Hãy đợi phản hồi rồi gửi lại.'
+        : !window.synapse?.sendGeminiMessage ? 'Hãy mở bản Synapse OS Electron mới để gửi tin nhắn.' : null;
+      const response: ChatMessage = {
         id: crypto.randomUUID(),
         author: 'system',
-        authorName: 'AGENT HQ',
+        authorName: isGemini ? 'Gemini' : 'AGENT HQ',
         time: now(),
-        text:
-          target === 'auto'
-            ? 'Đã nhận yêu cầu. Triage Router sẽ phân loại Fast-Path / DAG-Path.'
-            : `Đã chuyển yêu cầu tới @${getAgentMeta(target).label}.`,
+        text: unavailable ?? 'Đang chờ Gemini trả lời…',
       };
-      setThreads((t) => ({ ...t, [currentActiveId]: [...(t[currentActiveId] ?? []), userMsg, ack] }));
+      setThreads((t) => ({ ...t, [threadId]: [...(t[threadId] ?? []), userMsg, response] }));
+      if (unavailable) return;
+      geminiPending.current = true;
+      const finish = (reply: string, failed = false) => {
+        setThreads((state) => ({
+          ...state,
+          [threadId]: (state[threadId] ?? []).map((item) => item.id === response.id
+            ? { ...item, authorName: failed ? 'AGENT HQ' : item.authorName, text: reply, time: now() }
+            : item),
+        }));
+      };
+      try {
+        const history = geminiHistory.current.get(threadId) ?? [];
+        const withHistory = `Ngữ cảnh gần đây: ${JSON.stringify(history)}\n\nTin nhắn mới: ${text}`;
+        const message = history.length && withHistory.length <= 32000 ? withHistory : text;
+        const reply = await window.synapse.sendGeminiMessage(message);
+        geminiHistory.current.set(threadId, [
+          ...history.slice(-4),
+          { role: 'user', text: text.slice(0, 1600) },
+          { role: 'assistant', text: reply.slice(0, 1600) },
+        ]);
+        finish(reply);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') : 'Không nhận được phản hồi.';
+        finish(`Không gửi được tới Gemini. ${reason}`, true);
+      } finally {
+        geminiPending.current = false;
+      }
     },
-    [activeId],
+    [threadId, networkSettings.default_chat_agent_id],
   );
 
   const newConversation = async () => {
@@ -195,6 +276,64 @@ export default function App() {
     setDeleteTarget(null);
   };
 
+  // Xử lý Ghim / Bỏ ghim dự án
+  const handleTogglePinProject = (projectHash: string) => {
+    setProjectOverrides((prev) => {
+      const current = prev[projectHash] || {};
+      const updated = {
+        ...prev,
+        [projectHash]: {
+          ...current,
+          isPinned: !current.isPinned,
+        },
+      };
+      saveProjectOverrides(updated);
+      return updated;
+    });
+    setProjectMenuTarget(null);
+  };
+
+  // Xử lý Đổi tên dự án
+  const handleConfirmRenameProject = (projectHash: string, newName: string) => {
+    setProjectOverrides((prev) => {
+      const current = prev[projectHash] || {};
+      const updated = {
+        ...prev,
+        [projectHash]: {
+          ...current,
+          customName: newName,
+        },
+      };
+      saveProjectOverrides(updated);
+      return updated;
+    });
+    setProjectRenameTarget(null);
+  };
+
+  // Xử lý Xóa dự án khỏi không gian làm việc
+  const handleConfirmDeleteProject = (projectHash: string) => {
+    setProjectOverrides((prev) => {
+      const current = prev[projectHash] || {};
+      const updated = {
+        ...prev,
+        [projectHash]: {
+          ...current,
+          isDeleted: true,
+        },
+      };
+      saveProjectOverrides(updated);
+      return updated;
+    });
+
+    if (activeProjectHash === projectHash) {
+      const remaining = effectiveProjects.filter((p) => p.project_hash !== projectHash);
+      if (remaining.length > 0) {
+        selectProject(remaining[0].project_hash);
+      }
+    }
+    setProjectDeleteTarget(null);
+  };
+
   const handleOpenProjectFolder = async () => {
     if (openingProject.current) return;
     openingProject.current = true;
@@ -233,10 +372,11 @@ export default function App() {
           quota={quota}
           live={live}
           onOpenChatMenu={(target) => setMenuTarget(target)}
-          projects={shadowProjects}
+          projects={effectiveProjects}
           activeProjectHash={activeProjectHash}
           onSelectProject={selectProject}
           onOpenProject={handleOpenProjectFolder}
+          onOpenProjectMenu={(target) => setProjectMenuTarget(target)}
         />
 
         {/* Center Column: Chat & Preview */}
@@ -292,6 +432,27 @@ export default function App() {
         deleteTarget={deleteTarget}
         onCloseDelete={() => setDeleteTarget(null)}
         onConfirmDelete={handleConfirmDelete}
+      />
+
+      {/* Popover Context Menu & Modals for Project Management */}
+      <ProjectManagementModals
+        menuTarget={projectMenuTarget}
+        onCloseMenu={() => setProjectMenuTarget(null)}
+        onOpenRename={(target) => {
+          setProjectMenuTarget(null);
+          setProjectRenameTarget(target);
+        }}
+        onTogglePin={handleTogglePinProject}
+        onOpenDelete={(target) => {
+          setProjectMenuTarget(null);
+          setProjectDeleteTarget(target);
+        }}
+        renameTarget={projectRenameTarget}
+        onCloseRename={() => setProjectRenameTarget(null)}
+        onConfirmRename={handleConfirmRenameProject}
+        deleteTarget={projectDeleteTarget}
+        onCloseDelete={() => setProjectDeleteTarget(null)}
+        onConfirmDelete={handleConfirmDeleteProject}
       />
 
       {/* Settings Modal (02 & 03 Cài đặt.svg) */}

@@ -11,6 +11,7 @@ import {
 } from '../icons';
 import { QuotaPanel } from './QuotaPanel';
 import type { ChatMenuTarget } from '../chat/ChatManagementModals';
+import type { ProjectMenuTarget } from './ProjectManagementModals';
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -24,6 +25,7 @@ interface SidebarProps {
   activeProjectHash?: string | null;
   onSelectProject?: (hash: string) => void;
   onOpenProject?: () => void;
+  onOpenProjectMenu?: (target: ProjectMenuTarget) => void;
 }
 
 export function Sidebar({
@@ -38,6 +40,7 @@ export function Sidebar({
   activeProjectHash,
   onSelectProject,
   onOpenProject,
+  onOpenProjectMenu,
 }: SidebarProps) {
   const handleOpenMenu = (
     e: MouseEvent,
@@ -57,11 +60,33 @@ export function Sidebar({
     });
   };
 
+  const handleOpenProjMenu = (
+    e: MouseEvent,
+    proj: ShadowProjectMeta
+  ) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    onOpenProjectMenu?.({
+      projectHash: proj.project_hash,
+      projectName: proj.project_name,
+      originalPath: proj.original_path,
+      isPinned: proj.is_pinned,
+      anchorRect: { top: rect.bottom, left: rect.left },
+    });
+  };
+
   // Sắp xếp: các đoạn chat được ghim (isPinned) lên đầu
   const sortedConversations = [...conversations].sort((a, b) => {
     if (a.isPinned && !b.isPinned) return -1;
     if (!a.isPinned && b.isPinned) return 1;
     return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
+  });
+
+  // Sắp xếp: các dự án được ghim (is_pinned) lên đầu
+  const sortedProjects = [...projects].sort((a, b) => {
+    if (a.is_pinned && !b.is_pinned) return -1;
+    if (!a.is_pinned && b.is_pinned) return 1;
+    return (a.project_name || '').localeCompare(b.project_name || '');
   });
 
   return (
@@ -163,7 +188,7 @@ export function Sidebar({
                 )}
               </div>
             ) : (
-              projects.map((proj) => {
+              sortedProjects.map((proj) => {
                 const isActiveProj = proj.project_hash === activeProjectHash;
                 return (
                   <div
@@ -176,11 +201,28 @@ export function Sidebar({
                     }`}
                   >
                     <div className="flex min-w-0 items-center gap-2">
-                      <IconFolder size={14} className="shrink-0 text-[#8297B2]" />
+                      {proj.is_pinned ? (
+                        <IconPin size={13} className="shrink-0 text-[#58E9A8]" />
+                      ) : (
+                        <IconFolder size={14} className="shrink-0 text-[#8297B2]" />
+                      )}
                       <span className="truncate text-[12px] font-medium">
                         {proj.project_name || 'Dự án'}
                       </span>
                       <IconShadowDb size={13} className="shrink-0 text-[#78BAFF]" />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {proj.is_pinned && <IconPin size={12} className="text-[#58E9A8]" />}
+                      {onOpenProjectMenu && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenProjMenu(e, proj)}
+                          className="rounded p-0.5 text-[#9DB0C8] opacity-0 transition group-hover:opacity-100 hover:text-[#EAF2FF]"
+                          title="Menu tùy chọn dự án"
+                        >
+                          <IconDots size={13} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

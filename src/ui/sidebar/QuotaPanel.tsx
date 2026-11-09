@@ -63,6 +63,7 @@ export function QuotaPanel({ quota, live = false }: QuotaPanelProps) {
                   {stat?.connection_status && <span className="text-[10px] text-[#8297B2]">{status}</span>}
                 </div>
                 <span
+                  title={stat?.quota_shared_with === 'codex' ? 'Hạn mức dùng chung với Codex' : undefined}
                   className={`font-mono text-[11px] font-normal ${
                     isWarning ? 'text-[#FFC075]' : 'text-[#9DB0C8]'
                   }`}
@@ -70,6 +71,9 @@ export function QuotaPanel({ quota, live = false }: QuotaPanelProps) {
                   {p5h === null ? '—' : `${p5h}%`} / {pWeek === null ? '—' : `${pWeek}%`}
                 </span>
               </div>
+              {stat?.quota_shared_with === 'codex' && (
+                <span className="text-[10px] text-[#8297B2]">Dùng chung với Codex</span>
+              )}
 
               {/* Progress bar */}
               <div className="h-[3px] w-full overflow-hidden rounded-full bg-[#23344A]">

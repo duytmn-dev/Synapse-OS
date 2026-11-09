@@ -39,6 +39,9 @@ export class SettingsService {
     return { agent_id: agent, display_name: config.display_name, role_description: config.role_description,
       connection_status: status.connection_status, auth_method: status.auth_method,
       quota_5h_percent: status.quota_5h_percent, quota_week_percent: status.quota_week_percent,
+      account_hint: status.account_hint, account_plan: status.account_plan, worker_model_name: status.worker_model_name,
+      quota_shared_with: status.quota_shared_with,
+      quota_report: status.quota_report,
       ...(preferences?.threshold === undefined ? {} : { alert_threshold_percent: preferences.threshold }),
       fallback_api: { is_configured: key !== null, use_fallback_on_error: preferences?.fallback ?? false,
         ...(key === null ? {} : { api_key_masked: '••••••••' }), is_valid: key !== null && this.verified.get(agent) === this.digest(key) } };

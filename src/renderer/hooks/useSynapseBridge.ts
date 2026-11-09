@@ -56,6 +56,7 @@ export function getBridge() {
 const toQuota = (agent: AgentSettingsProfile): AgentQuotaStat => ({
   agent_id: agent.agent_id,
   connection_status: agent.connection_status,
+  quota_shared_with: agent.quota_shared_with,
   usage_5h_percent: agent.quota_5h_percent,
   usage_week_percent: agent.quota_week_percent,
 });

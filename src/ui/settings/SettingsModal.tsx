@@ -93,7 +93,9 @@ export function SettingsModal(props: SettingsModalProps) {
       } else if (action === 'CONNECT') {
         showNotice(`Đã kết nối thành công tới ${agentId.toUpperCase()}.`);
       } else if (action === 'REFRESH') {
-        showNotice(profile.connection_status === 'DISCONNECTED' ? `${agentId.toUpperCase()} chưa đăng nhập.` : `Đã cập nhật trạng thái ${agentId.toUpperCase()}.`);
+        showNotice(profile.connection_status === 'DISCONNECTED' ? `${agentId.toUpperCase()} chưa đăng nhập.`
+          : agentId === 'gemini' && !profile.quota_report ? 'Gemini đã kết nối. Phiên ACP chưa trả bảng hạn mức.'
+          : `Đã cập nhật trạng thái ${agentId.toUpperCase()}.`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Thao tác không thành công';
@@ -308,7 +310,7 @@ export function SettingsModal(props: SettingsModalProps) {
                   </div>
 
                   <select
-                    value={networkSettings.default_chat_agent_id}
+                    value={networkSettings.default_chat_agent_id === 'gemini_antigravity' ? 'gemini' : networkSettings.default_chat_agent_id}
                     onChange={(e) => {
                       if (onSetDefaultChatAgent) {
                         onSetDefaultChatAgent(e.target.value);
@@ -317,7 +319,7 @@ export function SettingsModal(props: SettingsModalProps) {
                     }}
                     className="h-8 rounded-[6px] border border-[#405672] bg-[#142235] px-3 text-[12px] font-medium text-[#EAF2FF] focus:border-[#58E9A8] focus:outline-none"
                   >
-                    <option value="gemini_antigravity">Gemini · Antigravity</option>
+                    <option value="gemini">Gemini · Antigravity</option>
                     <option value="chatgpt">ChatGPT · Điều phối</option>
                     <option value="claude">Claude · Agent công ty</option>
                     <option value="codex">Codex · CLI</option>
@@ -377,26 +379,39 @@ export function SettingsModal(props: SettingsModalProps) {
                                   ({agent.role_description})
                                 </span>
                               </div>
-                              <div className="flex items-center gap-3 text-[11.5px]">
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px]">
                                 <span
                                   className="flex items-center gap-1 font-medium"
                                   style={{
                                     color: isConnected ? '#58E9A8' : '#8297B2',
                                   }}
                                 >
-                                  • {agent.auth_method}
+                                  • {agent.agent_id === 'gemini' && isConnected ? 'Đã kết nối · ' : ''}{agent.auth_method}
                                 </span>
                                 <span className="text-[#8297B2]">
+                                  {agent.quota_shared_with === 'codex' ? 'Quota dùng chung với Codex · ' : ''}
                                   5h {agent.quota_5h_percent === null ? '—' : `${agent.quota_5h_percent}%`} · Tuần {agent.quota_week_percent === null ? '—' : `${agent.quota_week_percent}%`}
                                 </span>
                               </div>
+                              {isConnected && (
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[#8297B2]">
+                                  {agent.account_hint && <span>Tài khoản {agent.account_hint}</span>}
+                                  {agent.account_plan && <span>Gói {agent.account_plan}</span>}
+                                  {agent.worker_model_name && <span>Model {agent.worker_model_name}</span>}
+                                  {!agent.quota_report && agent.quota_5h_percent === null && agent.quota_week_percent === null && (
+                                    <span>{agent.agent_id === 'gemini'
+                                      ? 'Xem hạn mức theo model bằng /usage trong Antigravity CLI'
+                                      : 'Phiên kết nối chưa cung cấp số liệu hạn mức'}</span>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </div>
 
                           {/* Action Buttons Right */}
                           <div className="flex items-center gap-2">
                             {/* CLI Agent Button */}
-                            {agent.agent_id === 'gemini' && (
+                            {agent.agent_id === 'gemini' && !isConnected && (
                               <button
                                 type="button"
                                 disabled={Boolean(isLoading)}
@@ -412,14 +427,13 @@ export function SettingsModal(props: SettingsModalProps) {
                               </button>
                             )}
 
-                            {/* ChatGPT Refresh Button */}
-                            {agent.agent_id === 'chatgpt' && isConnected && (
+                            {isConnected && (
                               <button
                                 type="button"
                                 disabled={Boolean(isLoading)}
-                                onClick={() => handleConnectionAction('chatgpt', 'REFRESH')}
+                                onClick={() => handleConnectionAction(agent.agent_id, 'REFRESH')}
                                 className="flex h-7 items-center gap-1.5 rounded-[6px] border border-[#23344A] bg-[#142235] px-3 text-[11.5px] font-medium text-[#EAF2FF] transition hover:border-[#58E9A8]"
-                                title="Làm mới token"
+                                title="Làm mới thông tin kết nối"
                               >
                                 {isLoading === 'REFRESH' ? (
                                   <span className="animate-spin text-[#58E9A8]">
@@ -428,7 +442,7 @@ export function SettingsModal(props: SettingsModalProps) {
                                 ) : (
                                   <IconRefresh size={12} />
                                 )}
-                                <span>Làm mới</span>
+                                <span>{agent.agent_id === 'gemini' ? 'Xem hạn mức' : 'Làm mới'}</span>
                               </button>
                             )}
 
@@ -471,6 +485,12 @@ export function SettingsModal(props: SettingsModalProps) {
                           </div>
                         </div>
 
+                        {agent.quota_report && isConnected && (
+                          <div className="mt-3 border-t border-[#1A2A3D] pt-3 text-[11.5px]">
+                            <div className="mb-1 font-semibold text-[#EAF2FF]">Hạn mức từ Antigravity</div>
+                            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-[#9DB0C8]">{agent.quota_report}</pre>
+                          </div>
+                        )}
                         {/* Slider Ngưỡng cảnh báo (02 Cài đặt · Mạng lưới AI.svg) */}
                         <div className="mt-3 flex items-center justify-between border-t border-[#1A2A3D] pt-3 text-[11.5px]">
                           <span className="text-[#8297B2]">

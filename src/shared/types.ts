@@ -89,6 +89,8 @@ export interface ShadowProjectInfo {
   git_branch: string;
   is_shadow_workspace: boolean; // Luôn là true để hiển thị badge SHADOW WORKSPACE
   sessions: ChatSessionItem[];
+  is_pinned?: boolean;
+  custom_name?: string;
 }
 
 // Alias thuận tiện cho ShadowProjectInfo
@@ -131,6 +133,11 @@ export interface AgentSettingsProfile {
   auth_method: string;       // VD: "OAuth · OS Keychain", "Đang chạy qua CLI", "Chưa kết nối"
   quota_5h_percent: number | null;
   quota_week_percent: number | null;
+  account_hint?: string; // Masked identifier, never a token or full email.
+  account_plan?: string;
+  worker_model_name?: string;
+  quota_shared_with?: 'codex';
+  quota_report?: string;
   alert_threshold_percent?: number; // Slider ngưỡng cảnh báo (VD: 80)
   fallback_api: {
     is_configured: boolean;
@@ -184,6 +191,7 @@ export interface AgentQuotaStat {
   usage_5h_percent: number | null;
   usage_week_percent: number | null;
   connection_status?: AgentSettingsProfile['connection_status'];
+  quota_shared_with?: AgentSettingsProfile['quota_shared_with'];
 }
 
 export interface DAGTaskItem {
