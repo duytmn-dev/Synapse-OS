@@ -1,4 +1,10 @@
-import type { AgentQuotaStat, DAGTaskItem, VisualOfficeEvent } from '../shared/types';
+import type {
+  AgentId, AgentQuotaStat, DAGTaskItem, VisualOfficeEvent, GraphData,
+  GraphActiveEvent, GraphNodeControlCommand, ShadowProjectMeta,
+  ChatSessionItem, ChatSessionMutationRequest, TaskTreeSnapshot,
+  AINetworkSettings, AgentSettingsProfile, AppearanceAndGraphSettings,
+  ToolDependencyStatus, WorkspaceStorageInfo, UpdateStatus,
+} from '../shared/types';
 
 export const IPC = {
   getQuota: 'synapse:quota:get',
@@ -11,6 +17,28 @@ export const IPC = {
   activeRoomsUpdated: 'active_rooms_update',
   getStorage: 'synapse:storage:get',
   saveKey: 'synapse:key:save',
+  getGraphData: 'synapse:graph:get',
+  controlGraphNode: 'synapse:graph:control',
+  graphDataUpdated: 'graph_data_update',
+  graphActiveEvent: 'graph_active_event',
+  openShadowProject: 'synapse:shadow:open',
+  getShadowProjects: 'synapse:shadow:list',
+  shadowProjectsUpdated: 'shadow_projects_update',
+  getChatSessions: 'synapse:chat:list',
+  mutateChatSession: 'synapse:chat:mutate',
+  chatSessionsUpdated: 'chat_sessions_update',
+  getTaskTree: 'synapse:task_tree:get',
+  taskTreeUpdated: 'task_tree_update',
+  getAINetworkSettings: 'synapse:settings:ai:get',
+  setDefaultChatAgent: 'synapse:settings:ai:default',
+  agentConnectionAction: 'synapse:settings:agent:action',
+  setFallbackOnError: 'synapse:settings:agent:fallback',
+  setAgentAlertThreshold: 'synapse:settings:agent:threshold',
+  getAppearanceSettings: 'synapse:settings:appearance:get',
+  saveAppearanceSettings: 'synapse:settings:appearance:save',
+  getToolDependencies: 'synapse:tools:get',
+  ensureToolDependency: 'synapse:tools:ensure',
+  getUpdateStatus: 'synapse:updates:get',
 } as const;
 
 export interface AgentRuntimeStatus {
@@ -26,18 +54,84 @@ export interface ActiveRoomsSnapshot {
   storage?: import('../shared/types').WorkspaceStorageInfo;
 }
 
-export interface SynapseAPI {
+// IPC operation signatures only; all domain payloads come from shared/types.ts.
+export interface SynapseRequests {
   getQuota(): Promise<AgentQuotaStat[]>;
   getTasks(): Promise<DAGTaskItem[]>;
   getOffice(): Promise<VisualOfficeEvent[]>;
+  getActiveRooms(): Promise<ActiveRoomsSnapshot>;
+  getWorkspaceStorage(): Promise<WorkspaceStorageInfo>;
+  saveAgentKey(agentId: AgentId, key: string): Promise<void>;
+  getGraphData(projectHash: string): Promise<GraphData>;
+  controlGraphNode(command: GraphNodeControlCommand): Promise<void>;
+  openShadowProject(projectPath: string): Promise<ShadowProjectMeta>;
+  getShadowProjects(): Promise<ShadowProjectMeta[]>;
+  // null selects standalone conversations; no implicit current project.
+  getChatSessions(projectHash: string | null): Promise<ChatSessionItem[]>;
+  // Returns the affected scope's remaining sessions, including after DELETE.
+  mutateChatSession(request: ChatSessionMutationRequest): Promise<ChatSessionItem[]>;
+  getTaskTree(): Promise<TaskTreeSnapshot>;
+  getAINetworkSettings(): Promise<AINetworkSettings>;
+  setDefaultChatAgent(agentId: AINetworkSettings['default_chat_agent_id']): Promise<AINetworkSettings>;
+  agentConnectionAction(agentId: AgentId, action: 'CONNECT' | 'DISCONNECT' | 'REFRESH' | 'CHECK_CLI' | 'CHECK_API'): Promise<AgentSettingsProfile>;
+  setFallbackOnError(agentId: AgentId, enabled: boolean): Promise<AgentSettingsProfile>;
+  setAgentAlertThreshold(agentId: AgentId, percent: number): Promise<AgentSettingsProfile>;
+  getAppearanceSettings(): Promise<AppearanceAndGraphSettings>;
+  saveAppearanceSettings(settings: AppearanceAndGraphSettings): Promise<void>;
+  getToolDependencies(): Promise<ToolDependencyStatus[]>;
+  ensureToolDependency(toolId: ToolDependencyStatus['tool_id']): Promise<ToolDependencyStatus>;
+  getUpdateStatus(): Promise<UpdateStatus>;
+}
+
+export interface SynapseAPI extends SynapseRequests {
   onQuotaUpdated(callback: (quota: AgentQuotaStat[]) => void): () => void;
   onTasksUpdated(callback: (tasks: DAGTaskItem[]) => void): () => void;
   onOfficeUpdated(callback: (event: VisualOfficeEvent) => void): () => void;
-  getActiveRooms(): Promise<ActiveRoomsSnapshot>;
   onActiveRoomsUpdated(callback: (snapshot: ActiveRoomsSnapshot) => void): () => void;
-  getWorkspaceStorage(): Promise<{ total_used_mb: number; core_app_mb: number; temp_files_mb: number }>;
-  saveAgentKey(agentId: string, key: string): Promise<void>;
+  onGraphDataUpdated(callback: (graph: GraphData) => void): () => void;
+  onGraphActiveEvent(callback: (event: GraphActiveEvent) => void): () => void;
+  onShadowProjectsUpdated(callback: (projects: ShadowProjectMeta[]) => void): () => void;
+  onChatSessionsUpdated(callback: (sessions: ChatSessionItem[]) => void): () => void;
+  onTaskTreeUpdated(callback: (tree: TaskTreeSnapshot) => void): () => void;
 }
+
+export const REQUEST_CHANNELS = {
+  getQuota: IPC.getQuota,
+  getTasks: IPC.getTasks,
+  getOffice: IPC.getOffice,
+  getActiveRooms: IPC.getActiveRooms,
+  getWorkspaceStorage: IPC.getStorage,
+  saveAgentKey: IPC.saveKey,
+  getGraphData: IPC.getGraphData,
+  controlGraphNode: IPC.controlGraphNode,
+  openShadowProject: IPC.openShadowProject,
+  getShadowProjects: IPC.getShadowProjects,
+  getChatSessions: IPC.getChatSessions,
+  mutateChatSession: IPC.mutateChatSession,
+  getTaskTree: IPC.getTaskTree,
+  getAINetworkSettings: IPC.getAINetworkSettings,
+  setDefaultChatAgent: IPC.setDefaultChatAgent,
+  agentConnectionAction: IPC.agentConnectionAction,
+  setFallbackOnError: IPC.setFallbackOnError,
+  setAgentAlertThreshold: IPC.setAgentAlertThreshold,
+  getAppearanceSettings: IPC.getAppearanceSettings,
+  saveAppearanceSettings: IPC.saveAppearanceSettings,
+  getToolDependencies: IPC.getToolDependencies,
+  ensureToolDependency: IPC.ensureToolDependency,
+  getUpdateStatus: IPC.getUpdateStatus,
+} as const satisfies Record<keyof SynapseRequests, string>;
+
+export const EVENT_CHANNELS = {
+  onQuotaUpdated: IPC.quotaUpdated,
+  onTasksUpdated: IPC.tasksUpdated,
+  onOfficeUpdated: IPC.officeUpdated,
+  onActiveRoomsUpdated: IPC.activeRoomsUpdated,
+  onGraphDataUpdated: IPC.graphDataUpdated,
+  onGraphActiveEvent: IPC.graphActiveEvent,
+  onShadowProjectsUpdated: IPC.shadowProjectsUpdated,
+  onChatSessionsUpdated: IPC.chatSessionsUpdated,
+  onTaskTreeUpdated: IPC.taskTreeUpdated,
+} as const satisfies Record<Exclude<keyof SynapseAPI, keyof SynapseRequests>, string>;
 
 declare global {
   interface Window {

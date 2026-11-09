@@ -8,6 +8,7 @@ import { VisualOfficeBridge } from './VisualOfficeBridge.ts';
 import { AgentStatusBridge } from './AgentStatusBridge.ts';
 import { getWorkspaceStorageInfo } from './WorkspaceStorage.ts';
 import { SecretStore } from './SecretStore.ts';
+import { registerPhase0Handlers } from './Phase0Handlers.ts';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -18,8 +19,10 @@ export const dagExecutor = new DAGExecutor();
 export let officeBridge: VisualOfficeBridge | undefined;
 export let agentStatusBridge: AgentStatusBridge | undefined;
 export let secretStore: SecretStore;
+let disposePhase0: (() => void) | undefined;
 
 function registerIPC(): void {
+  disposePhase0 = registerPhase0Handlers(ipcMain, () => mainWindow?.webContents ?? null);
   for (const [channel, snapshot] of [
     [IPC.getQuota, quota],
   ] as const) {
@@ -94,4 +97,4 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('will-quit', () => { officeBridge?.dispose(); agentStatusBridge?.dispose(); ipcMain.removeHandler(IPC.getStorage); ipcMain.removeHandler(IPC.saveKey); });
+app.on('will-quit', () => { disposePhase0?.(); officeBridge?.dispose(); agentStatusBridge?.dispose(); ipcMain.removeHandler(IPC.getQuota); ipcMain.removeHandler(IPC.getStorage); ipcMain.removeHandler(IPC.saveKey); });

@@ -20,8 +20,16 @@
 - [x] **TEST PHA 0 (FE):** Chạy `npx tsc --noEmit` đảm bảo `types.ts` không có lỗi cú pháp. *(Ghi chú: `npx tsc --noEmit` và `npm run build` đều PASS 100%, 0 lỗi cú pháp / type error).*
 
 **Nhánh BACKEND (Codex - Model: GPT-6.1 Terra):**
-- [ ] Cập nhật `src/main/preload.ts` phơi bày đầy đủ các IPC channels mới cho Knowledge Graph, Shadow Workspace và Quản lý Chat theo đúng `src/shared/types.ts`.
-- [ ] **TEST PHA 0 (BE):** Chạy contract test kiểm tra toàn bộ hàm trong `window.synapse` khớp kiểu với `types.ts`.
+- [x] Cập nhật `src/main/preload.ts` phơi bày đầy đủ các IPC channels mới cho Knowledge Graph, Shadow Workspace và Quản lý Chat theo đúng `src/shared/types.ts`.
+- [x] **TEST PHA 0 (BE):** Chạy contract test kiểm tra toàn bộ hàm trong `window.synapse` khớp kiểu với `types.ts`.
+
+**Ghi chú PHA 0 (BE — 09/11/2026):**
+- Bridge gồm 23 hàm gọi IPC và 9 subscription, dùng trực tiếp kiểu chung cho Graph, Shadow Workspace, Chat Session Mutation, Task Tree và Settings. Các kênh legacy tiếp tục hoạt động. `Phase0Handlers` được đăng ký trong main process, kiểm tra sender/main frame và dọn handler khi thoát.
+- Khung sườn của 17 thao tác thuộc pha sau trả lỗi tường minh `NOT_IMPLEMENTED` (mã nằm trong message để đi qua Electron IPC); không giả lập dữ liệu, không báo ghi thành công và không tạo file trong thư mục dự án. SQLite/Graphify/Settings service thật được triển khai ở các pha tương ứng.
+- `npx tsc --noEmit`: **PASS**, bao gồm `tests/contracts/backend.contract.ts` kiểm tra chính xác kiểu của toàn bộ API, preload và tham số handler.
+- `node --experimental-transform-types --experimental-vm-modules --test tests/contracts/backend.test.ts`: **PASS 35/35**, kiểm tra preload expose, channel/arguments/results/errors, event/unsubscribe, phân quyền sender và rollback đăng ký handler.
+- `npm test`: **chưa chạy được vì package.json chưa có script test**. Chạy trực tiếp toàn bộ test hiện có bằng `node --experimental-transform-types --experimental-vm-modules --test "src/**/*.test.ts" "tests/**/*.test.ts"`: **60 PASS, 0 FAIL, 1 SKIP** (bài tải FFmpeg thật được opt-in riêng).
+- `npm run build`: **PASS** (renderer, Electron main và preload); Vite còn cảnh báo bundle renderer lớn hơn 500 kB.
 
 ---
 
