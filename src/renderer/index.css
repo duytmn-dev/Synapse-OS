@@ -1,66 +1,67 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource/jetbrains-mono";
 @import "tailwindcss";
 
-/* Design tokens — Dark Mode theo docs/design_reference.png */
 @theme {
-  --color-hq-bg: #0b1220;
-  --color-hq-panel: #111a2b;
-  --color-hq-border: #1f2a3d;
-  --color-hq-accent: #2dd4a7;
-  --color-hq-text: #e5e9f0;
-  --color-hq-muted: #8a94a7;
+  --font-sans: 'Inter Variable', Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --color-bg-base: #080E18;
+  --color-bg-panel: #0E1725;
+  --color-bg-card: #142235;
+  --color-bg-input: #0A1220;
+  --color-border-main: #23344A;
+  --color-border-subtle: #1A2A3D;
+  --color-border-highlight: #405672;
+  --color-accent-green: #58E9A8;
+  --color-accent-purple: #A88BFA;
+  --color-accent-blue: #78BAFF;
+  --color-accent-orange: #FFC075;
+  --color-accent-red: #FF9A83;
+  --color-text-primary: #EAF2FF;
+  --color-text-secondary: #9DB0C8;
+  --color-text-tertiary: #8297B2;
 }
 
 html,
 body,
 #root {
   height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: #080E18;
+  color: #EAF2FF;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
-body {
-  margin: 0;
-  background: var(--color-hq-bg);
-  color: var(--color-hq-text);
-  font-family: Inter, system-ui, 'Segoe UI', Roboto, sans-serif;
+/* Background Grid Pattern from 01 Dashboard.svg */
+.bg-grid-dashboard {
+  background-color: #080E18;
+  background-image:
+    linear-gradient(to right, rgba(26, 42, 61, 0.24) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(26, 42, 61, 0.24) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
-/* Tailwind v4 quét nguồn ngoài thư mục gốc CSS */
-@source "../ui";
-
-/* ───── Hoạt ảnh Văn phòng 3D ───── */
-@keyframes office-typing {
-  from { transform: translateY(0); }
-  to { transform: translateY(-1.2px); }
-}
-@keyframes office-thinking {
-  0%, 100% { transform: rotate(0deg); }
-  50% { transform: rotate(-3deg); }
-}
-@keyframes office-screen {
-  0%, 100% { opacity: 0.85; }
-  50% { opacity: 0.55; }
-}
-@keyframes office-pop {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-2px); }
-}
-@keyframes office-bubble {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
-}
-@keyframes light-trail-flow {
-  from { stroke-dashoffset: 48; }
-  to { stroke-dashoffset: 0; }
-}
-.office-typing { animation: office-typing 0.35s ease-in-out infinite alternate; transform-box: fill-box; }
-.office-thinking { animation: office-thinking 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: bottom center; }
-.office-screen { animation: office-screen 0.9s steps(3) infinite; }
-.office-badge > * { animation: office-pop 2s ease-in-out infinite; }
-.office-bubble { animation: office-bubble 1.4s ease-in-out infinite; }
-.office-light-trail {
-  stroke-dasharray: 8 5;
-  animation: light-trail-flow 1.2s linear infinite;
+.bg-grid-graph {
+  background-color: #0A1220;
+  background-image:
+    linear-gradient(to right, rgba(26, 42, 61, 0.55) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(26, 42, 61, 0.55) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #1f2a3d; border-radius: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #23344A;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #405672;
+}

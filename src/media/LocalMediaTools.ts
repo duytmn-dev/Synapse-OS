@@ -69,6 +69,11 @@ export class LocalMediaTools {
     }
   }
 
+  /** Read-only integrity/executable check; does not install anything. */
+  async isInstalled(): Promise<boolean> {
+    return this.valid(this.executable, this.artifact(), AbortSignal.timeout(15000));
+  }
+
   /** Nothing is installed at construction/import time. A directory lock protects
    * concurrent instances/processes; timeout bounds abandoned-lock waits. Staging
    * files are verified before publication, and failed installs can be retried.

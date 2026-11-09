@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["../../src/core/**/*.ts", "../../src/adapters/**/*.ts", "../../src/main/**/*.ts", "../../src/shared/types.ts", "./**/*.ts"],
+  "exclude": []
+}

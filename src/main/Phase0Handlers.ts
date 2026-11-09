@@ -31,7 +31,8 @@ export const phase0Handlers = {
 } satisfies Phase0Requests;
 
 export function registerPhase0Handlers(ipc: Pick<IpcMain, 'handle' | 'removeHandler'>,
-  getContents: () => WebContents | null): () => void {
+  getContents: () => WebContents | null, services: Partial<Phase0Requests> = {}): () => void {
+  const handlers = { ...phase0Handlers, ...services };
   const registered: string[] = [];
   const dispose = () => { registered.splice(0).forEach((channel) => ipc.removeHandler(channel)); };
   try {
@@ -42,9 +43,9 @@ export function registerPhase0Handlers(ipc: Pick<IpcMain, 'handle' | 'removeHand
         if (!contents || contents.isDestroyed() || event.sender !== contents || event.senderFrame !== contents.mainFrame) {
           throw new Error('UNTRUSTED_SENDER: Untrusted IPC sender');
         }
-        // These skeletons always reject, before interpreting input or performing I/O.
-        // Replace with validated service adapters when each later phase is implemented.
-        return (phase0Handlers[operation] as (...values: unknown[]) => Promise<never>)(...args);
+        // Installed service adapters validate untrusted arguments before any I/O.
+        // Unavailable capabilities retain explicit errors, never fake success/data.
+        return (handlers[operation] as (...values: unknown[]) => Promise<unknown>)(...args);
       });
       registered.push(channel);
     }

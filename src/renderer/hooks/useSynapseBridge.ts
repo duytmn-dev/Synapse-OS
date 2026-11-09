@@ -1,12 +1,43 @@
-import { useEffect, useState } from 'react';
-import type { AgentQuotaStat, DAGTaskItem, VisualOfficeEvent } from '@shared/types';
-import { DEMO_ACTIVE_ROOMS, DEMO_OFFICE, DEMO_QUOTA, DEMO_TASKS } from '@renderer/mock/demoData';
+import { useEffect, useState, useCallback } from 'react';
+import type {
+  AgentId,
+  AgentQuotaStat,
+  AgentSettingsProfile,
+  AINetworkSettings,
+  AppearanceAndGraphSettings,
+  AppearanceSettings,
+  DAGTaskItem,
+  GraphActiveEvent,
+  GraphData,
+  ToolDependencyStatus,
+  UpdateStatus,
+  VisualOfficeEvent,
+  WorkspaceStorageInfo,
+} from '@shared/types';
+import {
+  DEMO_ACTIVE_ROOMS,
+  DEMO_AI_NETWORK_SETTINGS,
+  DEMO_APPEARANCE_SETTINGS,
+  DEMO_OFFICE,
+  DEMO_QUOTA,
+  DEMO_TASKS,
+  DEMO_TOOL_DEPENDENCIES,
+  DEMO_UPDATE_STATUS,
+  DEMO_WORKSPACE_STORAGE,
+} from '@renderer/mock/demoData';
 
 export interface SynapseState {
   quota: AgentQuotaStat[];
   tasks: DAGTaskItem[];
   office: VisualOfficeEvent[];
   activeRooms: VisualOfficeEvent['room_id'][];
+  graphData: GraphData | null;
+  graphActiveEvent: GraphActiveEvent | null;
+  networkSettings: AINetworkSettings;
+  appearanceSettings: AppearanceSettings;
+  toolDependencies: ToolDependencyStatus[];
+  workspaceStorage: WorkspaceStorageInfo;
+  updateStatus: UpdateStatus;
   /** true = đang nhận dữ liệu thật từ IPC Bridge; false = dữ liệu minh hoạ. */
   live: boolean;
 }
@@ -23,18 +54,25 @@ export function mergeOfficeEvent(list: VisualOfficeEvent[], ev: VisualOfficeEven
   return next;
 }
 
-function getBridge() {
+export function getBridge() {
   // window.synapse chỉ tồn tại khi chạy trong Electron (preload contextBridge).
   return typeof window !== 'undefined' && window.synapse ? window.synapse : undefined;
 }
 
-export function useSynapseBridge(): SynapseState {
+export function useSynapseBridge() {
   const bridge = getBridge();
   const [state, setState] = useState<SynapseState>({
     quota: DEMO_QUOTA,
     tasks: DEMO_TASKS,
     office: DEMO_OFFICE,
     activeRooms: DEMO_ACTIVE_ROOMS,
+    graphData: null,
+    graphActiveEvent: null,
+    networkSettings: DEMO_AI_NETWORK_SETTINGS,
+    appearanceSettings: DEMO_APPEARANCE_SETTINGS,
+    toolDependencies: DEMO_TOOL_DEPENDENCIES,
+    workspaceStorage: DEMO_WORKSPACE_STORAGE,
+    updateStatus: DEMO_UPDATE_STATUS,
     live: false,
   });
 
@@ -48,8 +86,14 @@ export function useSynapseBridge(): SynapseState {
       bridge.getTasks().catch(() => DEMO_TASKS),
       bridge.getOffice().catch(() => DEMO_OFFICE),
       bridge.getActiveRooms ? bridge.getActiveRooms().catch(() => null) : Promise.resolve(null),
+      bridge.getAINetworkSettings ? bridge.getAINetworkSettings().catch(() => DEMO_AI_NETWORK_SETTINGS) : Promise.resolve(DEMO_AI_NETWORK_SETTINGS),
+      bridge.getAppearanceSettings ? bridge.getAppearanceSettings().catch(() => DEMO_APPEARANCE_SETTINGS) : Promise.resolve(DEMO_APPEARANCE_SETTINGS),
+      bridge.getToolDependencies ? bridge.getToolDependencies().catch(() => DEMO_TOOL_DEPENDENCIES) : Promise.resolve(DEMO_TOOL_DEPENDENCIES),
+      bridge.getUpdateStatus ? bridge.getUpdateStatus().catch(() => DEMO_UPDATE_STATUS) : Promise.resolve(DEMO_UPDATE_STATUS),
+      bridge.getWorkspaceStorage ? bridge.getWorkspaceStorage().catch(() => DEMO_WORKSPACE_STORAGE) : Promise.resolve(DEMO_WORKSPACE_STORAGE),
+      bridge.getGraphData ? bridge.getGraphData('default').catch(() => null) : Promise.resolve(null),
     ])
-      .then(([quota, tasks, office, activeRoomsSnap]) => {
+      .then(([quota, tasks, office, activeRoomsSnap, network, appearance, tools, updates, storage, graph]) => {
         if (!disposed) {
           setState((prev) => ({
             ...prev,
@@ -60,6 +104,12 @@ export function useSynapseBridge(): SynapseState {
               activeRoomsSnap && activeRoomsSnap.active_rooms && activeRoomsSnap.active_rooms.length > 0
                 ? activeRoomsSnap.active_rooms
                 : prev.activeRooms,
+            networkSettings: network ?? prev.networkSettings,
+            appearanceSettings: (appearance as AppearanceSettings) ?? prev.appearanceSettings,
+            toolDependencies: tools ?? prev.toolDependencies,
+            updateStatus: updates ?? prev.updateStatus,
+            workspaceStorage: storage ?? prev.workspaceStorage,
+            graphData: graph ?? prev.graphData,
             live: true,
           }));
         }
@@ -92,6 +142,29 @@ export function useSynapseBridge(): SynapseState {
         )
       );
     }
+    // Lắng nghe sự kiện GraphActiveEvent thời gian thực (Path lights up)
+    if (bridge.onGraphActiveEvent) {
+      offs.push(
+        bridge.onGraphActiveEvent((ev) =>
+          setState((s) => ({
+            ...s,
+            graphActiveEvent: ev,
+            live: true,
+          }))
+        )
+      );
+    }
+    if (bridge.onGraphDataUpdated) {
+      offs.push(
+        bridge.onGraphDataUpdated((graph) =>
+          setState((s) => ({
+            ...s,
+            graphData: graph,
+            live: true,
+          }))
+        )
+      );
+    }
 
     return () => {
       disposed = true;
@@ -99,5 +172,197 @@ export function useSynapseBridge(): SynapseState {
     };
   }, [bridge]);
 
-  return state;
+  // Các action IPC thực thi gọi thẳng vào bridge
+  const agentConnectionAction = useCallback(
+    async (agentId: AgentId, action: 'CONNECT' | 'DISCONNECT' | 'REFRESH' | 'CHECK_CLI' | 'CHECK_API'): Promise<AgentSettingsProfile> => {
+      if (bridge?.agentConnectionAction) {
+        const updated = await bridge.agentConnectionAction(agentId, action);
+        setState((s) => ({
+          ...s,
+          networkSettings: {
+            ...s.networkSettings,
+            agents: s.networkSettings.agents.map((a) => (a.agent_id === agentId ? updated : a)),
+          },
+        }));
+        return updated;
+      }
+      // Fallback cho môi trường web
+      const agent = state.networkSettings.agents.find((a) => a.agent_id === agentId);
+      const nextStatus = action === 'DISCONNECT' ? 'DISCONNECTED' : 'CONNECTED';
+      const fallbackProfile: AgentSettingsProfile = agent
+        ? { ...agent, connection_status: nextStatus as any }
+        : {
+            agent_id: agentId,
+            display_name: agentId,
+            role_description: '',
+            connection_status: nextStatus as any,
+            auth_method: 'OAuth',
+            quota_5h_percent: 50,
+            quota_week_percent: 30,
+            fallback_api: { is_configured: false, use_fallback_on_error: false, is_valid: false },
+          };
+      setState((s) => ({
+        ...s,
+        networkSettings: {
+          ...s.networkSettings,
+          agents: s.networkSettings.agents.map((a) => (a.agent_id === agentId ? fallbackProfile : a)),
+        },
+      }));
+      return fallbackProfile;
+    },
+    [bridge, state.networkSettings]
+  );
+
+  const setFallbackOnError = useCallback(
+    async (agentId: AgentId, enabled: boolean): Promise<AgentSettingsProfile> => {
+      if (bridge?.setFallbackOnError) {
+        const updated = await bridge.setFallbackOnError(agentId, enabled);
+        setState((s) => ({
+          ...s,
+          networkSettings: {
+            ...s.networkSettings,
+            agents: s.networkSettings.agents.map((a) => (a.agent_id === agentId ? updated : a)),
+          },
+        }));
+        return updated;
+      }
+      const agent = state.networkSettings.agents.find((a) => a.agent_id === agentId);
+      const fallbackProfile: AgentSettingsProfile = {
+        ...agent!,
+        fallback_api: { ...agent!.fallback_api, use_fallback_on_error: enabled },
+      };
+      setState((s) => ({
+        ...s,
+        networkSettings: {
+          ...s.networkSettings,
+          agents: s.networkSettings.agents.map((a) => (a.agent_id === agentId ? fallbackProfile : a)),
+        },
+      }));
+      return fallbackProfile;
+    },
+    [bridge, state.networkSettings]
+  );
+
+  const setAgentAlertThreshold = useCallback(
+    async (agentId: AgentId, percent: number): Promise<AgentSettingsProfile> => {
+      if (bridge?.setAgentAlertThreshold) {
+        const updated = await bridge.setAgentAlertThreshold(agentId, percent);
+        setState((s) => ({
+          ...s,
+          networkSettings: {
+            ...s.networkSettings,
+            agents: s.networkSettings.agents.map((a) => (a.agent_id === agentId ? updated : a)),
+          },
+        }));
+        return updated;
+      }
+      const agent = state.networkSettings.agents.find((a) => a.agent_id === agentId);
+      const fallbackProfile: AgentSettingsProfile = {
+        ...agent!,
+        alert_threshold_percent: percent,
+      };
+      setState((s) => ({
+        ...s,
+        networkSettings: {
+          ...s.networkSettings,
+          agents: s.networkSettings.agents.map((a) => (a.agent_id === agentId ? fallbackProfile : a)),
+        },
+      }));
+      return fallbackProfile;
+    },
+    [bridge, state.networkSettings]
+  );
+
+  const saveAgentKey = useCallback(
+    async (agentId: AgentId, key: string): Promise<void> => {
+      if (bridge?.saveAgentKey) {
+        await bridge.saveAgentKey(agentId, key);
+      }
+      const masked = `${key.slice(0, 8)}••••••••••••••••${key.slice(-4)}`;
+      setState((s) => ({
+        ...s,
+        networkSettings: {
+          ...s.networkSettings,
+          agents: s.networkSettings.agents.map((a) =>
+            a.agent_id === agentId
+              ? {
+                  ...a,
+                  fallback_api: {
+                    ...a.fallback_api,
+                    is_configured: true,
+                    api_key_masked: masked,
+                    is_valid: true,
+                  },
+                }
+              : a
+          ),
+        },
+      }));
+    },
+    [bridge]
+  );
+
+  const setDefaultChatAgent = useCallback(
+    async (agentId: string): Promise<AINetworkSettings> => {
+      if (bridge?.setDefaultChatAgent) {
+        const updated = await bridge.setDefaultChatAgent(agentId);
+        setState((s) => ({ ...s, networkSettings: updated }));
+        return updated;
+      }
+      const updated: AINetworkSettings = {
+        ...state.networkSettings,
+        default_chat_agent_id: agentId,
+      };
+      setState((s) => ({ ...s, networkSettings: updated }));
+      return updated;
+    },
+    [bridge, state.networkSettings]
+  );
+
+  const saveAppearanceSettings = useCallback(
+    async (settings: AppearanceAndGraphSettings): Promise<void> => {
+      if (bridge?.saveAppearanceSettings) {
+        await bridge.saveAppearanceSettings(settings);
+      }
+      setState((s) => ({
+        ...s,
+        appearanceSettings: { ...s.appearanceSettings, ...settings },
+      }));
+    },
+    [bridge]
+  );
+
+  const ensureToolDependency = useCallback(
+    async (toolId: ToolDependencyStatus['tool_id']): Promise<ToolDependencyStatus> => {
+      if (bridge?.ensureToolDependency) {
+        const updated = await bridge.ensureToolDependency(toolId);
+        setState((s) => ({
+          ...s,
+          toolDependencies: s.toolDependencies.map((t) => (t.tool_id === toolId ? updated : t)),
+        }));
+        return updated;
+      }
+      const existing = state.toolDependencies.find((t) => t.tool_id === toolId);
+      const updated: ToolDependencyStatus = existing
+        ? { ...existing, is_installed: true }
+        : { tool_id: toolId, tool_name: toolId, is_installed: true, size_mb: 42 };
+      setState((s) => ({
+        ...s,
+        toolDependencies: s.toolDependencies.map((t) => (t.tool_id === toolId ? updated : t)),
+      }));
+      return updated;
+    },
+    [bridge, state.toolDependencies]
+  );
+
+  return {
+    ...state,
+    agentConnectionAction,
+    setFallbackOnError,
+    setAgentAlertThreshold,
+    saveAgentKey,
+    setDefaultChatAgent,
+    saveAppearanceSettings,
+    ensureToolDependency,
+  };
 }

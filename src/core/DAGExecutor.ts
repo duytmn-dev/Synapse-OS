@@ -1,10 +1,12 @@
 import type { AgentBrandId, DAGTaskItem, VisualOfficeEvent } from '../shared/types';
+import type { GraphActivity, GraphOperation } from './GraphActivity.ts';
 
 export interface TaskContext {
   signal: AbortSignal;
   taskCode: string;
   /** Only successful, declared prerequisites (groups expand to their leaves). */
   dependencies: ReadonlyMap<string, unknown>;
+  withFile<T>(operation: Omit<GraphOperation, 'agent_id' | 'task_code'>, work: () => T | Promise<T>): Promise<T>;
 }
 
 /** A task is either a runnable leaf or a group of children, never both.
@@ -19,6 +21,8 @@ export interface DAGTask {
   children?: readonly DAGTask[];
   run?: (context: TaskContext) => unknown | Promise<unknown>;
   timeoutMs?: number;
+  /** Declared file access is protected for the full lifetime of the task handler. */
+  graph?: Omit<GraphOperation, 'agent_id' | 'task_code'>;
 }
 
 export interface ExecutionResult {
@@ -57,6 +61,12 @@ export class DAGExecutor {
   private readonly officeListeners = new Set<(event: VisualOfficeEvent) => void>();
   private readonly concurrency: number;
   private readonly timeoutMs: number;
+  private graphActivity?: GraphActivity;
+
+  connectGraphActivity(activity: GraphActivity): void {
+    if (this.active) throw new Error('Cannot replace graph activity during execution');
+    this.graphActivity = activity;
+  }
 
   constructor(options: { concurrency?: number; timeoutMs?: number } = {}) {
     this.concurrency = options.concurrency ?? 3;
@@ -106,6 +116,7 @@ export class DAGExecutor {
       if (!task.code?.trim() || nodes.has(task.code)) throw new Error(`Invalid or duplicate task code: ${task.code}`);
       if (!task.title?.trim() || !task.agent?.trim()) throw new Error(`Missing title or agent: ${task.code}`);
       if (task.timeoutMs !== undefined) this.validateTimeout(task.timeoutMs);
+      if (task.graph && !this.graphActivity) throw new Error('GRAPH_SERVICE_UNAVAILABLE: Connect GraphActivity before running file tasks');
       const children = task.children ?? [];
       if (children.length ? task.run !== undefined : typeof task.run !== 'function') {
         throw new Error(`Task ${task.code} must have either children or a run handler`);
@@ -190,9 +201,14 @@ export class DAGExecutor {
         const work = Promise.resolve().then(() => {
           controller.signal.throwIfAborted();
           this.emitOffice({ room_id: room, desk_index: desk, active_task_code: task.code, animation_state: 'TYPING' });
-          return task.run!({ signal: controller.signal, taskCode: task.code,
+          const run = () => task.run!({ signal: controller.signal, taskCode: task.code,
             dependencies: new Map([...leaf.dependencies].map((code) => [code, outputs.get(code)])),
+            withFile: (operation, work) => {
+              if (!this.graphActivity) return Promise.reject(new Error('GRAPH_SERVICE_UNAVAILABLE'));
+              return this.graphActivity.run({ ...operation, agent_id: task.agent as GraphOperation['agent_id'], task_code: task.code }, work, controller.signal);
+            },
           });
+          return task.graph ? this.graphActivity!.run({ ...task.graph, agent_id: task.agent as GraphOperation['agent_id'], task_code: task.code }, run, controller.signal) : run();
         });
         outputs.set(task.code, await Promise.race([work, interrupted]));
         leaf.status = 'COMPLETED';

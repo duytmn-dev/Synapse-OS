@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AgentQuotaStat } from '../shared/types';
 import { IPC } from './ipc';
 import { DAGExecutor } from '../core/DAGExecutor.ts';
 import { VisualOfficeBridge } from './VisualOfficeBridge.ts';
@@ -9,42 +8,51 @@ import { AgentStatusBridge } from './AgentStatusBridge.ts';
 import { getWorkspaceStorageInfo } from './WorkspaceStorage.ts';
 import { SecretStore } from './SecretStore.ts';
 import { registerPhase0Handlers } from './Phase0Handlers.ts';
+import type { ShadowWorkspaceManager } from '../core/workspace/ShadowWorkspaceManager.ts';
+import { createWorkspaceHandlers } from './WorkspaceHandlers.ts';
+import { createWorkspaceRuntime } from './WorkspaceRuntime.ts';
+import { GraphActivity } from '../core/GraphActivity.ts';
+import { GraphEventBridge } from './GraphEventBridge.ts';
+import { CLIAdapter, type AgentCLIConfig } from '../adapters/CLIAdapter.ts';
+import { SettingsService } from './SettingsService.ts';
+import { SystemSettingsService } from './SystemSettingsService.ts';
+import { createSettingsHandlers, registerSettingsCredentials } from './SettingsHandlers.ts';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 
-// Adapters/QuotaTracker will supply quota data in the next phase.
-const quota: AgentQuotaStat[] = [];
 export const dagExecutor = new DAGExecutor();
 export let officeBridge: VisualOfficeBridge | undefined;
 export let agentStatusBridge: AgentStatusBridge | undefined;
 export let secretStore: SecretStore;
 let disposePhase0: (() => void) | undefined;
+export let shadowWorkspaceManager: ShadowWorkspaceManager;
+export let graphActivity: GraphActivity;
+export let settingsService: SettingsService;
+let graphEventBridge: GraphEventBridge | undefined;
+let disposeCredentials: (() => void) | undefined;
+
+export function createAgentCLIAdapter(config: AgentCLIConfig): CLIAdapter {
+  if (!graphActivity) throw new Error('GRAPH_SERVICE_UNAVAILABLE');
+  return new CLIAdapter(config, undefined, graphActivity);
+}
 
 function registerIPC(): void {
-  disposePhase0 = registerPhase0Handlers(ipcMain, () => mainWindow?.webContents ?? null);
-  for (const [channel, snapshot] of [
-    [IPC.getQuota, quota],
-  ] as const) {
-    ipcMain.handle(channel, (event) => {
-      if (!mainWindow || event.sender !== mainWindow.webContents ||
-          event.senderFrame !== mainWindow.webContents.mainFrame) {
-        throw new Error('Untrusted IPC sender');
-      }
-      return snapshot;
-    });
-  }
-  officeBridge = new VisualOfficeBridge(dagExecutor, ipcMain, () => mainWindow?.webContents ?? null);
+  shadowWorkspaceManager = createWorkspaceRuntime(app);
+  graphActivity = new GraphActivity(shadowWorkspaceManager);
+  dagExecutor.connectGraphActivity(graphActivity);
+  graphEventBridge = new GraphEventBridge(graphActivity, () => mainWindow?.webContents ?? null);
   agentStatusBridge = new AgentStatusBridge(ipcMain, () => mainWindow?.webContents ?? null);
   secretStore = new SecretStore(path.join(app.getPath('userData'), 'secrets'));
-  ipcMain.handle(IPC.saveKey, async (event, agentId: unknown, key: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('Untrusted IPC sender');
-    if (typeof agentId !== 'string' || typeof key !== 'string') throw new Error('Invalid key request');
-    await secretStore.save(agentId, key);
-    const existing = agentStatusBridge!.snapshot().agents.find((agent) => agent.agent_id === agentId);
-    agentStatusBridge!.update({ agent_id: agentId, connection_status: existing?.connection_status ?? 'DISCONNECTED',
-      worker_model_name: existing?.worker_model_name, keychain_configured: null });
+  settingsService = new SettingsService(app.getPath('userData'), secretStore, (agent, status) => {
+    agentStatusBridge?.update({ agent_id: agent, connection_status: status.connection_status,
+      worker_model_name: status.worker_model_name, keychain_configured: null });
   });
+  disposePhase0 = registerPhase0Handlers(ipcMain, () => mainWindow?.webContents ?? null,
+    { ...createWorkspaceHandlers(shadowWorkspaceManager, () => mainWindow?.webContents ?? null),
+      ...createSettingsHandlers(settingsService, new SystemSettingsService(app.getPath('userData'), app.getVersion())) });
+  disposeCredentials = registerSettingsCredentials(ipcMain, () => mainWindow?.webContents ?? null, settingsService);
+  officeBridge = new VisualOfficeBridge(dagExecutor, ipcMain, () => mainWindow?.webContents ?? null);
   ipcMain.handle(IPC.getStorage, (event) => {
     if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) {
       throw new Error('Untrusted IPC sender');
@@ -97,4 +105,4 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('will-quit', () => { disposePhase0?.(); officeBridge?.dispose(); agentStatusBridge?.dispose(); ipcMain.removeHandler(IPC.getQuota); ipcMain.removeHandler(IPC.getStorage); ipcMain.removeHandler(IPC.saveKey); });
+app.on('will-quit', () => { disposeCredentials?.(); disposePhase0?.(); graphEventBridge?.dispose(); shadowWorkspaceManager?.dispose(); officeBridge?.dispose(); agentStatusBridge?.dispose(); ipcMain.removeHandler(IPC.getStorage); });

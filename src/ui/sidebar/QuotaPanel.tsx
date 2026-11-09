@@ -1,112 +1,93 @@
 import type { AgentQuotaStat } from '@shared/types';
-import { getAgentMeta } from '../agents';
-import { IconInfo, IconLayers } from '../icons';
+import { IconLayers } from '../icons';
 
-function levelColor(pct: number): string {
-  return pct >= 85 ? '#fbbf24' : '#e5e9f0';
+interface QuotaPanelProps {
+  quota: AgentQuotaStat[];
+  live?: boolean;
 }
 
-function barColor(pct: number): string {
-  if (pct >= 85) return '#f59e0b';
-  if (pct >= 60) return '#38bdf8';
-  return '#2dd4a7';
+interface AgentDisplayConfig {
+  id: string;
+  name: string;
+  color: string;
+  default5h: number;
+  defaultWeek: number;
 }
 
-function statusDot(stat: AgentQuotaStat): string {
-  const worst = Math.max(stat.usage_5h_percent, stat.usage_week_percent);
-  if (worst >= 100) return '#ef4444';
-  if (worst >= 85) return '#f59e0b';
-  return '#22c55e';
-}
+const AGENTS: AgentDisplayConfig[] = [
+  { id: 'chatgpt', name: 'ChatGPT', color: '#58E9A8', default5h: 40, defaultWeek: 28 },
+  { id: 'gemini', name: 'Gemini', color: '#A88BFA', default5h: 25, defaultWeek: 18 },
+  { id: 'codex', name: 'Codex', color: '#78BAFF', default5h: 70, defaultWeek: 45 },
+  { id: 'claude', name: 'Claude', color: '#FFC075', default5h: 90, defaultWeek: 65 },
+];
 
-const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
-
-function UsageCell({ pct, compact }: { pct: number; compact: boolean }) {
-  const v = clamp(pct);
+export function QuotaPanel({ quota, live = false }: QuotaPanelProps) {
   return (
-    <div className="flex flex-col items-end gap-1">
-      <span className="tabular-nums" style={{ color: levelColor(v) }}>
-        {v}%
-      </span>
-      {!compact && (
-        <div className="h-1 w-full max-w-10 overflow-hidden rounded-full bg-white/5">
-          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${v}%`, background: barColor(v) }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function QuotaPanel({ quota, live, compact = false }: { quota: AgentQuotaStat[]; live: boolean; compact?: boolean }) {
-  return (
-    <section className="flex flex-col gap-2">
-      <header className="flex items-center justify-between px-1">
-        <h2 className="flex items-center gap-2 text-sm font-semibold">
-          <IconLayers size={15} className="text-hq-muted" /> Giới hạn
-        </h2>
-        <span
-          className={`rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
-            live ? 'border-hq-accent/40 text-hq-accent' : 'border-hq-border text-hq-muted'
-          }`}
-        >
-          {live ? 'Trực tiếp' : 'Minh hoạ'}
+    <div className="flex flex-col gap-2.5 pt-1">
+      {/* Section Header */}
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold tracking-wider text-[#8297B2]">
+          GIỚI HẠN AGENT
         </span>
-      </header>
-
-      <div className="rounded-lg border border-hq-border bg-black/10">
-        <table className="w-full table-fixed text-xs">
-          <colgroup>
-            <col />
-            <col className="w-[52px]" />
-            <col className="w-[52px]" />
-          </colgroup>
-          <thead>
-            <tr className="text-hq-muted">
-              <th className="px-2 py-2 text-left font-medium">Agent</th>
-              <th className="px-1.5 py-2 text-right font-medium">5h</th>
-              <th className="px-2 py-2 text-right font-medium">Tuần</th>
-            </tr>
-          </thead>
-          <tbody>
-            {quota.map((q) => {
-              const meta = getAgentMeta(q.agent_id);
-              return (
-                <tr key={q.agent_id} className="border-t border-hq-border/60">
-                  <td className="px-2 py-2">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <span
-                        className="grid h-5 w-5 place-items-center rounded-full text-[9px] font-bold"
-                        style={{ background: `${meta.color}26`, color: meta.color }}
-                      >
-                        {meta.glyph}
-                      </span>
-                      <span className="truncate">{meta.label}</span>
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: statusDot(q) }} />
-                    </div>
-                  </td>
-                  <td className="px-1.5 py-2 text-right">
-                    <UsageCell pct={q.usage_5h_percent} compact={compact} />
-                  </td>
-                  <td className="px-2 py-2 text-right">
-                    <UsageCell pct={q.usage_week_percent} compact={compact} />
-                  </td>
-                </tr>
-              );
-            })}
-            {quota.length === 0 && (
-              <tr>
-                <td colSpan={3} className="px-2.5 py-3 text-center text-hq-muted">
-                  Chưa có agent nào kết nối
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <IconLayers size={14} className="text-[#8297B2]" />
       </div>
 
-      <p className="flex items-center gap-1.5 px-1 text-[11px] text-hq-muted">
-        <IconInfo size={12} /> % đã dùng · {live ? 'QuotaTracker' : 'Minh hoạ'}
-      </p>
-    </section>
+      {/* Sub Header */}
+      <div className="flex items-center justify-between text-[10.5px] text-[#8297B2]">
+        <span>% đã dùng</span>
+        <span className="font-mono text-[11px]">5 giờ / Tuần</span>
+      </div>
+
+      {/* Agents List */}
+      <div className="flex flex-col gap-3">
+        {AGENTS.map((cfg) => {
+          const stat = quota.find(
+            (q) => q.agent_id.toLowerCase() === cfg.id || (cfg.id === 'gemini' && q.agent_id.toLowerCase().includes('gemini'))
+          );
+          const p5h = stat?.usage_5h_percent ?? cfg.default5h;
+          const pWeek = stat?.usage_week_percent ?? cfg.defaultWeek;
+          const isWarning = p5h >= 80;
+
+          return (
+            <div key={cfg.id} className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: cfg.color }}
+                  />
+                  <span className="text-[12px] font-medium text-[#9DB0C8]">
+                    {cfg.name}
+                  </span>
+                </div>
+                <span
+                  className={`font-mono text-[11px] font-normal ${
+                    isWarning ? 'text-[#FFC075]' : 'text-[#9DB0C8]'
+                  }`}
+                >
+                  {p5h}% / {pWeek}%
+                </span>
+              </div>
+
+              {/* Progress bar */}
+              <div className="h-[3px] w-full overflow-hidden rounded-full bg-[#23344A]">
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${Math.min(Math.max(p5h, 0), 100)}%`,
+                    backgroundColor: cfg.color,
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Footer live status */}
+      <span className="mt-1 text-[10.5px] text-[#8297B2]">
+        {live ? 'Đã kết nối IPC thời gian thực' : 'Số liệu minh họa'}
+      </span>
+    </div>
   );
 }

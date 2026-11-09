@@ -1,9 +1,5 @@
 import type { AgentBrandId } from '@shared/types';
 
-/**
- * Kiểu dữ liệu CHỈ dùng nội bộ UI (chưa có trong hợp đồng docs/04).
- * Nếu Backend cần đẩy tin nhắn qua IPC, phải đề xuất bổ sung vào src/shared/types.ts.
- */
 export interface ChatAttachment {
   name: string;
   sizeLabel: string;
@@ -19,7 +15,7 @@ export interface ChatCode {
 export interface ChatMedia {
   title: string;
   durationSec: number;
-  thumbnails: string[]; // CSS gradient hoặc URL
+  thumbnails?: string[];
 }
 
 export interface ChatMessage {
@@ -37,8 +33,11 @@ export interface ChatMessage {
 export interface Conversation {
   id: string;
   title: string;
+  isPinned?: boolean;
+  projectHash?: string | null;
+  updatedAt?: number;
 }
 
-export type ViewMode = 'chat' | 'chat3d';
+export type ViewMode = 'chat' | 'graph';
 
 export type TargetAgent = AgentBrandId | 'auto';

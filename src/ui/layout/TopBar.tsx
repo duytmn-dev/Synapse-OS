@@ -1,62 +1,95 @@
-import type { ReactNode } from 'react';
 import type { ViewMode } from '../chat/types';
-import { IconBell, IconChat, IconChevronDown, IconCube, IconSettings } from '../icons';
+import {
+  IconChat,
+  IconChevronDown,
+  IconFolder,
+  IconGraph,
+  IconLogoHex,
+  IconSettings,
+} from '../icons';
 
 interface TopBarProps {
   projectTitle: string;
   mode: ViewMode;
   onModeChange: (m: ViewMode) => void;
-  userName: string;
   onOpenSettings?: () => void;
+  onSelectProject?: () => void;
 }
 
-export function TopBar({ projectTitle, mode, onModeChange, userName, onOpenSettings }: TopBarProps) {
-  const tab = (m: ViewMode, label: string, icon: ReactNode) => (
-    <button
-      onClick={() => onModeChange(m)}
-      aria-pressed={mode === m}
-      className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm transition ${
-        mode === m ? 'border border-hq-accent/50 bg-hq-accent/15 text-hq-accent' : 'border border-transparent text-hq-muted hover:text-hq-text'
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-
+export function TopBar({
+  projectTitle,
+  mode,
+  onModeChange,
+  onOpenSettings,
+}: TopBarProps) {
   return (
-    <header className="relative flex h-14 shrink-0 items-center border-b border-hq-border bg-hq-panel px-4">
-      <div className="flex items-center gap-2.5">
-        <IconCube size={22} className="text-sky-300" />
-        <span className="text-[15px] font-bold tracking-wide">AGENT HQ</span>
-      </div>
-      <button className="ml-10 flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium hover:bg-white/5">
-        {projectTitle} <IconChevronDown size={14} className="text-hq-muted" />
-      </button>
-
-      <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-hq-border bg-black/20 p-1">
-        {tab('chat', 'Chat', <IconChat size={14} />)}
-        {tab('chat3d', 'Chat + 3D', <IconCube size={14} />)}
-      </div>
-
-      <div className="ml-auto flex items-center gap-4">
-        <button
-          onClick={onOpenSettings}
-          className="text-hq-muted transition hover:text-hq-accent"
-          aria-label="Cài đặt hệ thống"
-          title="Cài đặt hệ thống (Mạng lưới AI & API)"
-        >
-          <IconSettings size={18} />
-        </button>
-        <button className="text-hq-muted hover:text-hq-text" aria-label="Thông báo">
-          <IconBell size={18} />
-        </button>
-        <button className="flex items-center gap-2 text-sm">
-          <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-amber-200 to-orange-400 text-xs font-bold text-slate-900">
-            {userName.charAt(0)}
+    <header className="relative flex h-[52px] w-full shrink-0 items-center justify-between rounded-[16px] border border-[#23344A] bg-[#0E1725] px-4 shadow-lg">
+      {/* Left: Logo & Project selector */}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <IconLogoHex size={22} />
+          <span className="text-[17px] font-medium tracking-tight text-[#EAF2FF]">
+            Synapse OS
           </span>
-          {userName}
-          <IconChevronDown size={14} className="text-hq-muted" />
+        </div>
+
+        <div className="mx-2 h-5 w-[1px] bg-[#23344A]" />
+
+        <button
+          className="flex items-center gap-2 rounded-md px-2 py-1 text-[13px] font-medium text-[#9DB0C8] transition hover:bg-[#142235] hover:text-[#EAF2FF]"
+          title="Chọn dự án hiện tại"
+        >
+          <IconFolder size={15} className="text-[#9DB0C8]" />
+          <span>{projectTitle}</span>
+          <IconChevronDown size={14} className="text-[#9DB0C8]" />
+        </button>
+      </div>
+
+      {/* Center: Mode switcher [💬 Chat] / [🕸️ Chat + Graph] */}
+      <div className="absolute left-1/2 flex -translate-x-1/2 items-center rounded-lg border border-[#23344A] bg-[#0A1220] p-[3px]">
+        <button
+          type="button"
+          onClick={() => onModeChange('chat')}
+          className={`flex items-center gap-2 rounded-md px-3.5 py-1 text-[12px] font-medium transition ${
+            mode === 'chat'
+              ? 'border border-[#405672] bg-[#142235] text-[#58E9A8] shadow-sm'
+              : 'border border-transparent text-[#9DB0C8] hover:text-[#EAF2FF]'
+          }`}
+        >
+          <IconChat size={14} />
+          <span>Chat</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onModeChange('graph')}
+          className={`flex items-center gap-2 rounded-md px-3.5 py-1 text-[12px] font-medium transition ${
+            mode === 'graph'
+              ? 'border border-[#405672] bg-[#142235] text-[#58E9A8] shadow-sm'
+              : 'border border-transparent text-[#9DB0C8] hover:text-[#EAF2FF]'
+          }`}
+        >
+          <IconGraph size={14} />
+          <span>Chat + Graph</span>
+        </button>
+      </div>
+
+      {/* Right: SHADOW WORKSPACE badge & Settings button */}
+      <div className="flex items-center gap-3">
+        {/* Shadow Workspace Badge */}
+        <div className="flex items-center gap-2 rounded-md border border-[#23344A] bg-[#0A1220] px-3 py-1 font-mono text-[11px] font-medium tracking-wide text-[#78BAFF]">
+          <span className="h-1.5 w-1.5 rounded-full bg-[#78BAFF] shadow-[0_0_6px_#78BAFF]" />
+          <span>SHADOW WORKSPACE</span>
+        </div>
+
+        {/* Settings button */}
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="flex items-center gap-2 rounded-lg border border-[#23344A] bg-[#142235] px-3.5 py-1 text-[12px] font-medium text-[#9DB0C8] transition hover:border-[#405672] hover:text-[#EAF2FF]"
+        >
+          <IconSettings size={14} />
+          <span>Cài đặt</span>
         </button>
       </div>
     </header>

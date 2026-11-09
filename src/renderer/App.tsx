@@ -1,58 +1,57 @@
 import { useCallback, useState } from 'react';
 import { useSynapseBridge } from './hooks/useSynapseBridge';
 import {
-  DEMO_AI_NETWORK_SETTINGS,
-  DEMO_APPEARANCE_SETTINGS,
   DEMO_CONVERSATIONS,
   DEMO_MESSAGES,
-  DEMO_TOOL_DEPENDENCIES,
-  DEMO_UPDATE_STATUS,
-  DEMO_WORKSPACE_STORAGE,
 } from './mock/demoData';
-import type {
-  AINetworkSettings,
-  AppearanceSettings,
-  ToolDependencyStatus,
-  VisualOfficeEvent,
-} from '@shared/types';
 import type { ChatMessage, Conversation, TargetAgent, ViewMode } from '../ui/chat/types';
 import { getAgentMeta } from '../ui/agents';
 import { TopBar } from '../ui/layout/TopBar';
 import { Sidebar } from '../ui/sidebar/Sidebar';
 import { ChatPanel } from '../ui/chat/ChatPanel';
-import { OfficePanel } from '../ui/office/OfficePanel';
+import { KnowledgeGraphPanel } from '../ui/graph/KnowledgeGraphPanel';
 import { TaskTree } from '../ui/tasks/TaskTree';
+import { ChatManagementModals, type ChatMenuTarget } from '../ui/chat/ChatManagementModals';
 import { SettingsModal } from '../ui/settings/SettingsModal';
 
 const now = () => new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
-const agentToRoomMap: Record<string, VisualOfficeEvent['room_id']> = {
-  chatgpt: 'CHATGPT',
-  codex: 'CODEX',
-  gemini: 'GEMINI_AGY',
-  gemini_agy: 'GEMINI_AGY',
-  claude: 'CLAUDE_EXT',
-};
-
 export default function App() {
-  const { quota, tasks, office, activeRooms: bridgeActiveRooms, live } = useSynapseBridge();
-  const [mode, setMode] = useState<ViewMode>('chat3d');
+  const {
+    quota,
+    tasks,
+    live,
+    graphActiveEvent,
+    graphData,
+    networkSettings,
+    appearanceSettings,
+    toolDependencies,
+    workspaceStorage,
+    updateStatus,
+    agentConnectionAction,
+    setFallbackOnError,
+    setAgentAlertThreshold,
+    saveAgentKey,
+    setDefaultChatAgent,
+    saveAppearanceSettings,
+    ensureToolDependency,
+  } = useSynapseBridge();
+
+  const [mode, setMode] = useState<ViewMode>('graph');
   const [conversations, setConversations] = useState<Conversation[]>(DEMO_CONVERSATIONS);
   const [activeId, setActiveId] = useState(DEMO_CONVERSATIONS[0].id);
   const [threads, setThreads] = useState<Record<string, ChatMessage[]>>({
     [DEMO_CONVERSATIONS[0].id]: DEMO_MESSAGES,
   });
   const [highlight, setHighlight] = useState<string | null>(null);
-  const [officeExpanded, setOfficeExpanded] = useState(false);
 
-  // Cấu hình Cài đặt (Settings)
+  // Chat Popover & Modal state (07 Quản lý chat.svg)
+  const [menuTarget, setMenuTarget] = useState<ChatMenuTarget | null>(null);
+  const [renameTarget, setRenameTarget] = useState<ChatMenuTarget | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ChatMenuTarget | null>(null);
+
+  // Settings State (02 & 03 Cài đặt.svg)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [networkSettings, setNetworkSettings] = useState<AINetworkSettings>(DEMO_AI_NETWORK_SETTINGS);
-  const [appearanceSettings, setAppearanceSettings] = useState<AppearanceSettings>(DEMO_APPEARANCE_SETTINGS);
-  const [toolDependencies] = useState<ToolDependencyStatus[]>(DEMO_TOOL_DEPENDENCIES);
-  const [activeRoomsOverride, setActiveRoomsOverride] = useState<VisualOfficeEvent['room_id'][] | null>(null);
-
-  const activeRooms = activeRoomsOverride ?? bridgeActiveRooms;
 
   const active = conversations.find((c) => c.id === activeId) ?? conversations[0];
   const messages = threads[activeId] ?? [];
@@ -87,48 +86,53 @@ export default function App() {
   );
 
   const newConversation = () => {
-    const c: Conversation = { id: crypto.randomUUID(), title: `Cuộc trò chuyện ${conversations.length + 1}` };
+    const c: Conversation = {
+      id: crypto.randomUUID(),
+      title: `Cuộc trò chuyện ${conversations.length + 1}`,
+      updatedAt: Date.now(),
+    };
     setConversations([c, ...conversations]);
     setActiveId(c.id);
   };
 
-  const handleToggleAgentConnection = (agentId: string) => {
-    setNetworkSettings((prev) => {
-      const updated = prev.agents.map((ag) => {
-        if (ag.agent_id !== agentId) return ag;
-        const nextStatus = ag.connection_status === 'CONNECTED' ? 'DISCONNECTED' : 'CONNECTED';
-        return {
-          ...ag,
-          connection_status: nextStatus as 'CONNECTED' | 'DISCONNECTED' | 'OUT_OF_QUOTA',
-        };
-      });
-
-      // Cập nhật danh sách phòng 3D hiển thị theo trạng thái kết nối
-      const newActiveRooms: VisualOfficeEvent['room_id'][] = ['MANAGER'];
-      for (const ag of updated) {
-        if (ag.connection_status === 'CONNECTED') {
-          const room = agentToRoomMap[ag.agent_id.toLowerCase()];
-          if (room) newActiveRooms.push(room);
-        }
-      }
-      setActiveRoomsOverride(newActiveRooms);
-
-      return { ...prev, agents: updated };
-    });
+  const handleTogglePin = (id: string) => {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, isPinned: !c.isPinned } : c)),
+    );
+    setMenuTarget(null);
   };
 
-  const is3D = mode === 'chat3d';
+  const handleConfirmRename = (id: string, newTitle: string) => {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c)),
+    );
+    setRenameTarget(null);
+  };
+
+  const handleConfirmDelete = (id: string) => {
+    setConversations((prev) => {
+      const filtered = prev.filter((c) => c.id !== id);
+      if (activeId === id && filtered.length > 0) {
+        setActiveId(filtered[0].id);
+      }
+      return filtered;
+    });
+    setDeleteTarget(null);
+  };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#080E18] text-[#EAF2FF] p-3 gap-3 bg-grid-dashboard font-sans">
+      {/* TopBar Header */}
       <TopBar
-        projectTitle={active.title}
+        projectTitle="Video 360 Highlights"
         mode={mode}
         onModeChange={setMode}
-        userName="Justin"
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
-      <div className="flex min-h-0 flex-1">
+
+      {/* Main 3-Column Layout */}
+      <div className="flex min-h-0 flex-1 gap-3">
+        {/* Left Column: Sidebar (225px) */}
         <Sidebar
           conversations={conversations}
           activeId={activeId}
@@ -136,48 +140,78 @@ export default function App() {
           onNew={newConversation}
           quota={quota}
           live={live}
+          onOpenChatMenu={(target) => setMenuTarget(target)}
         />
-        {!(is3D && officeExpanded) && (
-          <ChatPanel
-            title={active.title}
-            messages={messages}
-            mode={mode}
-            autoOrchestrated={is3D}
-            connectedAgents={quota}
-            onSend={handleSend}
-            onToggle3D={() => setMode(is3D ? 'chat' : 'chat3d')}
-            onOpenOffice={() => setMode('chat3d')}
-          />
-        )}
-        {is3D && (
-          <aside className={`flex min-h-0 flex-col gap-3 p-3 ${officeExpanded ? 'flex-1' : 'w-[440px] shrink-0 xl:w-[500px]'}`}>
-            <OfficePanel
-              events={office}
-              activeRooms={activeRooms}
-              highlightCode={highlight}
-              onSelectCode={(c) => setHighlight((h) => (h === c ? null : c))}
-              onClose={() => setMode('chat')}
-              expanded={officeExpanded}
-              onToggleExpand={() => setOfficeExpanded((v) => !v)}
-              enableLightTrails={appearanceSettings.enable_light_trails}
-            />
-            <TaskTree projectTitle="Tool cắt video 360" tasks={tasks} highlightCode={highlight} onHover={setHighlight} />
+
+        {/* Center Column: Chat & Preview */}
+        <ChatPanel
+          title={active.title}
+          projectPathSubtitle="Video 360 Highlights / Chat dự án"
+          messages={messages}
+          connectedAgents={quota}
+          onSend={handleSend}
+          onFocusGraph={() => setMode('graph')}
+        />
+
+        {/* Right Column: Knowledge Graph + DAG Task Tree (When Chat + Graph mode is active) */}
+        {mode === 'graph' && (
+          <aside className="flex min-h-0 w-[480px] shrink-0 flex-col gap-3 xl:w-[540px]">
+            <div className="h-[55%] min-h-0">
+              <KnowledgeGraphPanel
+                isRunning={true}
+                activeEvent={graphActiveEvent}
+                graphData={graphData}
+              />
+            </div>
+            <div className="h-[45%] min-h-0">
+              <TaskTree
+                projectTitle="Tool cắt video 360"
+                tasks={tasks}
+                highlightCode={highlight}
+                onHover={setHighlight}
+              />
+            </div>
           </aside>
         )}
       </div>
 
-      {/* Màn hình Cài đặt (Settings Modal 4 Tab) */}
+      {/* Popover Context Menu & Modals for Chat Management (07 Quản lý chat.svg) */}
+      <ChatManagementModals
+        menuTarget={menuTarget}
+        onCloseMenu={() => setMenuTarget(null)}
+        onOpenRename={(target) => {
+          setMenuTarget(null);
+          setRenameTarget(target);
+        }}
+        onTogglePin={handleTogglePin}
+        onOpenDelete={(target) => {
+          setMenuTarget(null);
+          setDeleteTarget(target);
+        }}
+        renameTarget={renameTarget}
+        onCloseRename={() => setRenameTarget(null)}
+        onConfirmRename={handleConfirmRename}
+        deleteTarget={deleteTarget}
+        onCloseDelete={() => setDeleteTarget(null)}
+        onConfirmDelete={handleConfirmDelete}
+      />
+
+      {/* Settings Modal (02 & 03 Cài đặt.svg) */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         networkSettings={networkSettings}
-        onSaveNetworkSettings={setNetworkSettings}
         toolDependencies={toolDependencies}
-        workspaceStorage={DEMO_WORKSPACE_STORAGE}
+        workspaceStorage={workspaceStorage}
         appearanceSettings={appearanceSettings}
-        onSaveAppearanceSettings={setAppearanceSettings}
-        updateStatus={DEMO_UPDATE_STATUS}
-        onToggleAgentConnection={handleToggleAgentConnection}
+        updateStatus={updateStatus}
+        onAgentConnectionAction={agentConnectionAction}
+        onSetFallbackOnError={setFallbackOnError}
+        onSetAgentAlertThreshold={setAgentAlertThreshold}
+        onSaveAgentKey={saveAgentKey}
+        onSetDefaultChatAgent={setDefaultChatAgent}
+        onSaveAppearanceSettings={saveAppearanceSettings}
+        onEnsureToolDependency={ensureToolDependency}
       />
     </div>
   );

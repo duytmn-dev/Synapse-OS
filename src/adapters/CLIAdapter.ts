@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import type { GraphActivity, GraphOperation } from '../core/GraphActivity.ts';
 
 export interface CLIRequest {
   executable: string;
@@ -75,7 +76,7 @@ export const runCLI: CLIRunner = async (request) => {
       grace = setTimeout(() => {
         child.kill('SIGKILL');
         child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
-        finish(null);
+        // Never report completion until 'close': graph locks must outlive the process.
       }, 2000);
     };
     const abort = () => stop(new Error('CLI cancelled'));
@@ -92,7 +93,10 @@ export const runCLI: CLIRunner = async (request) => {
     };
     child.stdout.on('data', (data: Buffer) => consume('stdout', data));
     child.stderr.on('data', (data: Buffer) => consume('stderr', data));
-    child.on('error', (error) => { failure = error; finish(null); });
+    child.on('error', (error) => {
+      if (child.pid) stop(error); // A failed kill is not proof that the process exited.
+      else { failure = error; finish(null); }
+    });
     child.on('close', finish);
     child.stdin.on('error', (error) => stop(error));
     request.signal?.addEventListener('abort', abort, { once: true });
@@ -107,18 +111,26 @@ export interface AgentCLIConfig { executable: string; args?: readonly string[]; 
 export class CLIAdapter {
   private readonly config: AgentCLIConfig;
   private readonly runner: CLIRunner;
-  constructor(config: AgentCLIConfig, runner: CLIRunner = runCLI) {
+  constructor(config: AgentCLIConfig, runner: CLIRunner = runCLI, private readonly activity?: GraphActivity) {
     this.config = { ...config, args: [...(config.args ?? [])] };
     this.runner = runner;
   }
-  run(prompt: string, options: Pick<CLIRequest, 'signal' | 'onOutput'> = {}): Promise<CLIResult> {
-    return this.runner({ ...this.config, ...options, stdin: prompt });
+  run(prompt: string, options: Pick<CLIRequest, 'signal' | 'onOutput'> & { graph?: GraphOperation } = {}): Promise<CLIResult> {
+    const { graph, ...request } = options;
+    const run = () => this.runner({ ...this.config, ...request, stdin: prompt });
+    return this.withGraph(graph, options.signal, run);
+  }
+  protected withGraph<T>(graph: GraphOperation | undefined, signal: AbortSignal | undefined, run: () => Promise<T>): Promise<T> {
+    if (!graph) return run();
+    if (!this.activity) return Promise.reject(new Error('GRAPH_SERVICE_UNAVAILABLE: Configure GraphActivity for file operations'));
+    return this.activity.run(graph, run, signal);
   }
 }
 
 /** For CLIs configured to emit one JSON value per stdout line. stderr stays separate. */
 export class JSONLinesCLIAdapter extends CLIAdapter {
-  async runJSON(prompt: string, options: { signal?: AbortSignal; onEvent?: (event: unknown) => void } = {}): Promise<unknown[]> {
+  async runJSON(prompt: string, options: { signal?: AbortSignal; onEvent?: (event: unknown) => void; graph?: GraphOperation } = {}): Promise<unknown[]> {
+    return this.withGraph(options.graph, options.signal, async () => {
     let pending = '';
     const events: unknown[] = [];
     const parse = (line: string): void => {
@@ -137,5 +149,6 @@ export class JSONLinesCLIAdapter extends CLIAdapter {
     } });
     parse(pending);
     return events;
+    });
   }
 }

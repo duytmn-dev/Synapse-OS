@@ -1,17 +1,15 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
 import type { AgentQuotaStat } from '@shared/types';
 import { getAgentMeta } from '../agents';
-import type { TargetAgent, ViewMode } from './types';
-import { IconChevronDown, IconCube, IconPaperclip, IconSend, IconX } from '../icons';
+import type { TargetAgent } from './types';
+import { IconChevronDown, IconPaperclip, IconSendPlane, IconX } from '../icons';
 
 interface SmartInputBarProps {
-  mode: ViewMode;
-  onToggle3D: () => void;
   onSend: (text: string, target: TargetAgent, files: File[]) => void;
   agents: AgentQuotaStat[];
 }
 
-export function SmartInputBar({ mode, onToggle3D, onSend, agents }: SmartInputBarProps) {
+export function SmartInputBar({ onSend, agents }: SmartInputBarProps) {
   const [text, setText] = useState('');
   const [target, setTarget] = useState<TargetAgent>('auto');
   const [files, setFiles] = useState<File[]>([]);
@@ -33,108 +31,152 @@ export function SmartInputBar({ mode, onToggle3D, onSend, agents }: SmartInputBa
     }
   };
 
-  const chip = 'flex items-center gap-1 rounded-md border border-hq-border px-2 py-1 text-xs text-hq-muted transition hover:text-hq-text';
-  const is3D = mode === 'chat3d';
+  const toolBtn =
+    'flex items-center gap-1.5 rounded-[6px] border border-[#23344A] bg-[#142235] px-2.5 py-1 text-[11.5px] font-medium text-[#9DB0C8] transition hover:border-[#405672] hover:text-[#EAF2FF]';
 
   return (
-    <div className="relative rounded-xl border border-hq-border bg-hq-panel p-2.5 focus-within:border-hq-accent/50">
+    <div className="relative rounded-[12px] border border-[#405672] bg-[#0A1220] p-3 shadow-md focus-within:border-[#58E9A8]/80 focus-within:shadow-[0_0_12px_rgba(88,233,168,0.12)]">
+      {/* File tags */}
       {files.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {files.map((f, i) => (
-            <span key={i} className="flex items-center gap-1 rounded-md bg-white/5 px-2 py-0.5 text-[11px]">
-              {f.name}
-              <button onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label="Bỏ file">
+            <span
+              key={i}
+              className="flex items-center gap-1 rounded-md border border-[#23344A] bg-[#142235] px-2 py-0.5 text-[11px] text-[#EAF2FF]"
+            >
+              <span className="truncate max-w-[140px]">{f.name}</span>
+              <button
+                type="button"
+                onClick={() => setFiles(files.filter((_, j) => j !== i))}
+                className="text-[#8297B2] hover:text-[#FF9A83]"
+              >
                 <IconX size={11} />
               </button>
             </span>
           ))}
         </div>
       )}
+
+      {/* Textarea */}
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKey}
-        rows={1}
-        placeholder="Bổ sung yêu cầu cho dự án..."
-        className="max-h-32 w-full resize-none bg-transparent px-1 text-sm outline-none placeholder:text-hq-muted"
+        rows={2}
+        placeholder="Nhập yêu cầu cho dự án..."
+        className="max-h-32 w-full resize-none bg-transparent px-1 text-[13px] text-[#EAF2FF] outline-none placeholder:text-[#8297B2]"
       />
-      <div className="mt-2 flex items-center gap-2">
-        <button className="text-hq-muted hover:text-hq-text" onClick={() => fileRef.current?.click()} aria-label="Đính kèm file">
-          <IconPaperclip size={16} />
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            setFiles([...files, ...Array.from(e.target.files ?? [])]);
-            e.target.value = '';
-          }}
-        />
 
-        <div className="relative">
-          <button className={chip} onClick={() => setMenu(menu === 'agent' ? null : 'agent')}>
-            @ {target === 'auto' ? 'Agent' : getAgentMeta(target).label}
+      {/* Bottom tools row */}
+      <div className="mt-2 flex items-center justify-between">
+        {/* Left tool pills */}
+        <div className="flex items-center gap-2">
+          {/* Attach button */}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className={toolBtn}
+            title="Đính kèm tệp"
+          >
+            <IconPaperclip size={13} className="text-[#9DB0C8]" />
+            <span>Đính kèm</span>
           </button>
-          {menu === 'agent' && (
-            <ul className="absolute bottom-9 left-0 z-20 w-40 rounded-lg border border-hq-border bg-hq-panel p-1 text-xs shadow-xl">
-              {agents.map((a) => {
-                const m = getAgentMeta(a.agent_id);
-                return (
-                  <li key={a.agent_id}>
-                    <button
-                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-white/5"
-                      onClick={() => {
-                        setTarget(a.agent_id);
-                        setMenu(null);
-                      }}
-                    >
-                      <span style={{ color: m.color }}>{m.glyph}</span> {m.label}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              setFiles([...files, ...Array.from(e.target.files ?? [])]);
+              e.target.value = '';
+            }}
+          />
+
+          {/* @Agent button */}
+          <div className="relative">
+            <button
+              type="button"
+              className={toolBtn}
+              onClick={() => setMenu(menu === 'agent' ? null : 'agent')}
+            >
+              <span>
+                {target === 'auto' ? '@Agent' : `@${getAgentMeta(target).label}`}
+              </span>
+            </button>
+            {menu === 'agent' && (
+              <ul className="absolute bottom-9 left-0 z-30 w-44 rounded-lg border border-[#23344A] bg-[#0E1725] p-1 text-[12px] shadow-2xl">
+                <li>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[#9DB0C8] hover:bg-[#142235] hover:text-[#EAF2FF]"
+                    onClick={() => {
+                      setTarget('auto');
+                      setMenu(null);
+                    }}
+                  >
+                    <span>✦ Tự động điều phối</span>
+                  </button>
+                </li>
+                {agents.map((a) => {
+                  const m = getAgentMeta(a.agent_id);
+                  return (
+                    <li key={a.agent_id}>
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[#9DB0C8] hover:bg-[#142235] hover:text-[#EAF2FF]"
+                        onClick={() => {
+                          setTarget(a.agent_id);
+                          setMenu(null);
+                        }}
+                      >
+                        <span style={{ color: m.color }}>{m.glyph}</span>
+                        <span>{m.label}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* Route dropdown (Tự động ▾) */}
+          <div className="relative">
+            <button
+              type="button"
+              className={toolBtn}
+              onClick={() => setMenu(menu === 'route' ? null : 'route')}
+            >
+              <span>{target === 'auto' ? 'Tự động' : 'Chỉ định'}</span>
+              <IconChevronDown size={11} className="text-[#9DB0C8]" />
+            </button>
+            {menu === 'route' && (
+              <ul className="absolute bottom-9 left-0 z-30 w-36 rounded-lg border border-[#23344A] bg-[#0E1725] p-1 text-[12px] shadow-2xl">
+                <li>
+                  <button
+                    type="button"
+                    className="w-full rounded px-2.5 py-1.5 text-left text-[#9DB0C8] hover:bg-[#142235] hover:text-[#EAF2FF]"
+                    onClick={() => {
+                      setTarget('auto');
+                      setMenu(null);
+                    }}
+                  >
+                    Tự động
+                  </button>
+                </li>
+              </ul>
+            )}
+          </div>
         </div>
 
-        <div className="relative">
-          <button className={chip} onClick={() => setMenu(menu === 'route' ? null : 'route')}>
-            {target === 'auto' ? 'Tự động' : 'Chỉ định'} <IconChevronDown size={12} />
-          </button>
-          {menu === 'route' && (
-            <ul className="absolute bottom-9 left-0 z-20 w-36 rounded-lg border border-hq-border bg-hq-panel p-1 text-xs shadow-xl">
-              <li>
-                <button
-                  className="w-full rounded px-2 py-1.5 text-left hover:bg-white/5"
-                  onClick={() => {
-                    setTarget('auto');
-                    setMenu(null);
-                  }}
-                >
-                  Tự động (Triage)
-                </button>
-              </li>
-            </ul>
-          )}
-        </div>
-
+        {/* Right Send button (Gửi) */}
         <button
-          onClick={onToggle3D}
-          className={`ml-auto flex items-center gap-1.5 rounded-md border px-3 py-1 text-xs transition ${
-            is3D ? 'border-hq-accent/50 bg-hq-accent/10 text-hq-accent' : 'border-hq-border text-hq-muted hover:text-hq-text'
-          }`}
-        >
-          <IconCube size={13} /> {is3D ? '3D đang bật' : 'Mở 3D'}
-        </button>
-        <button
+          type="button"
           onClick={submit}
-          className="grid h-7 w-8 place-items-center rounded-md bg-hq-accent text-slate-900 transition hover:brightness-110 disabled:opacity-40"
           disabled={!text.trim() && files.length === 0}
-          aria-label="Gửi"
+          className="flex h-[29px] items-center gap-1.5 rounded-[6px] border border-[#58E9A8] bg-[#58E9A8] px-3.5 text-[12px] font-semibold text-[#071912] shadow-sm transition hover:bg-[#6af2b4] disabled:opacity-40"
         >
-          <IconSend size={14} />
+          <IconSendPlane size={14} className="text-[#071912]" />
+          <span>Gửi</span>
         </button>
       </div>
     </div>
