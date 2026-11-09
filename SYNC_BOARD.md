@@ -16,8 +16,8 @@
 
 ## PHA 0: CẬP NHẬT HỢP ĐỒNG DỮ LIỆU GRAPH & SHADOW WORKSPACE (CHẠY TUẦN TỰ)
 **Nhánh FRONTEND (Antigravity - Model: Claude Sonnet 5.5 / Gemini 3.8 Flash):**
-- [ ] Cập nhật `src/shared/types.ts` khớp 100% với `docs/04_SHARED_DATA_CONTRACTS.md` (Bổ sung `GraphData`, `GraphNode`, `GraphEdge`, `GraphActiveEvent`, `ShadowProjectMeta`, `ChatSessionItem`, cập nhật `AppearanceSettings` sang Graph).
-- [ ] **TEST PHA 0 (FE):** Chạy `npx tsc --noEmit` đảm bảo `types.ts` không có lỗi cú pháp.
+- [x] Cập nhật `src/shared/types.ts` khớp 100% với `docs/04_SHARED_DATA_CONTRACTS.md` (Bổ sung `GraphData`, `GraphNode`, `GraphEdge`, `GraphActiveEvent`, `ShadowProjectMeta`, `ChatSessionItem`, cập nhật `AppearanceSettings` sang Graph).
+- [x] **TEST PHA 0 (FE):** Chạy `npx tsc --noEmit` đảm bảo `types.ts` không có lỗi cú pháp. *(Ghi chú: `npx tsc --noEmit` và `npm run build` đều PASS 100%, 0 lỗi cú pháp / type error).*
 
 **Nhánh BACKEND (Codex - Model: GPT-6.1 Terra):**
 - [ ] Cập nhật `src/main/preload.ts` phơi bày đầy đủ các IPC channels mới cho Knowledge Graph, Shadow Workspace và Quản lý Chat theo đúng `src/shared/types.ts`.

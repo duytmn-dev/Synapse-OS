@@ -119,7 +119,7 @@ export const DEMO_AI_NETWORK_SETTINGS: AINetworkSettings = {
       },
     },
     {
-      agent_id: 'gemini_agy',
+      agent_id: 'gemini',
       display_name: 'Antigravity · Gemini',
       role_description: 'UI & Vision',
       connection_status: 'CONNECTED',
@@ -177,11 +177,15 @@ export const DEMO_TOOL_DEPENDENCIES: ToolDependencyStatus[] = [
 export const DEMO_WORKSPACE_STORAGE: WorkspaceStorageInfo = {
   total_used_mb: 127,
   core_app_mb: 42,
+  shadow_workspaces_mb: 0,
   temp_files_mb: 85,
 };
 
 export const DEMO_APPEARANCE_SETTINGS: AppearanceSettings = {
   startup_behavior: 'RESTORE_SESSION',
+  graph_render_fps: 'HIGH_60FPS',
+  enable_graph_glow: true,
+  enable_path_lights_up: true,
   office_3d_performance: 'HIGH_60FPS',
   enable_realtime_shadows: true,
   enable_light_trails: true,
