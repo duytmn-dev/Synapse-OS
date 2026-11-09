@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSynapseBridge } from './hooks/useSynapseBridge';
-import type { ChatMessage, Conversation, TargetAgent, ViewMode } from '../ui/chat/types';
+import type { ChatMessage, TargetAgent, ViewMode } from '../ui/chat/types';
 import { getAgentMeta } from '../ui/agents';
 import { TopBar } from '../ui/layout/TopBar';
 import { Sidebar } from '../ui/sidebar/Sidebar';
@@ -10,7 +10,7 @@ import { TaskTree } from '../ui/tasks/TaskTree';
 import { ChatManagementModals, type ChatMenuTarget } from '../ui/chat/ChatManagementModals';
 import { ProjectManagementModals, type ProjectMenuTarget } from '../ui/sidebar/ProjectManagementModals';
 import { SettingsModal } from '../ui/settings/SettingsModal';
-import type { ShadowProjectMeta } from '@shared/types';
+import type { ChatSessionMutationRequest, ShadowProjectMeta } from '@shared/types';
 
 interface ProjectCustomOverride {
   customName?: string;
@@ -39,6 +39,28 @@ const saveProjectOverrides = (overrides: Record<string, ProjectCustomOverride>) 
 
 const now = () => new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
+function chatErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
+}
+
+function isChatMessage(value: unknown): value is ChatMessage {
+  if (!value || typeof value !== 'object') return false;
+  const message = value as Partial<ChatMessage>;
+  return typeof message.id === 'string' && (message.author === 'user' || message.author === 'system') &&
+    typeof message.authorName === 'string' && typeof message.time === 'string' && typeof message.text === 'string';
+}
+
+function geminiHistoryFrom(items: unknown[]) {
+  const messages = items.filter(isChatMessage);
+  return messages.flatMap((reply, index) => {
+    const request = messages[index - 1];
+    return reply.author === 'system' && reply.authorName === 'Gemini' && request?.author === 'user'
+      ? [{ role: 'user', text: request.text.slice(0, 1600) }, { role: 'assistant', text: reply.text.slice(0, 1600) }]
+      : [];
+  }).slice(-6);
+}
+
 export default function App() {
   const {
     quota,
@@ -47,7 +69,7 @@ export default function App() {
     graphActiveEvent,
     graphData,
     shadowProjects,
-    chatSessions,
+    standaloneSessions,
     activeProjectHash,
     networkSettings,
     appearanceSettings,
@@ -57,6 +79,7 @@ export default function App() {
     selectProject,
     pickShadowProject,
     mutateChatSession,
+    saveChatMessages,
     agentConnectionAction,
     setFallbackOnError,
     setAgentAlertThreshold,
@@ -68,11 +91,16 @@ export default function App() {
   } = useSynapseBridge();
 
   const [mode, setMode] = useState<ViewMode>('graph');
-  const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string>('');
-  const [threads, setThreads] = useState<Record<string, ChatMessage[]>>({});
-  const geminiPending = useRef(false);
-  const geminiHistory = useRef(new Map<string, { role: 'user' | 'assistant'; text: string }[]>());
+  const [threads, setThreads] = useState<Record<string, unknown[]>>({});
+  const threadsRef = useRef(threads);
+  const navigation = useRef(0);
+  const creating = useRef(false);
+  const [createPending, setCreatePending] = useState(false);
+  const sending = useRef(false);
+  const [pendingReply, setPendingReply] = useState<{ id: string; message: ChatMessage } | null>(null);
+  const [sendPending, setSendPending] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
   const openingProject = useRef(false);
   const [projectError, setProjectError] = useState<string | null>(null);
@@ -105,175 +133,176 @@ export default function App() {
   // Settings State (02 & 03 Cài đặt.svg)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Đồng bộ danh sách hội thoại từ SQLite chatSessions thật
-  const conversations: Conversation[] = useMemo(() => {
-    if (chatSessions && chatSessions.length > 0) {
-      return chatSessions.map((s) => ({
-        id: s.session_id,
-        title: s.title,
-        isPinned: s.is_pinned,
-        projectHash: s.project_hash,
-        updatedAt: s.updated_at,
-      }));
-    }
-    return localConversations;
-  }, [chatSessions, localConversations]);
+  const currentProject = effectiveProjects.find((p) => p.project_hash === activeProjectHash);
+  const projectTitle = currentProject?.project_name ?? 'Chat độc lập';
+  const sessionsFor = (hash: string | null) => hash === null
+    ? standaloneSessions
+    : effectiveProjects.find((p) => p.project_hash === hash)?.sessions ?? [];
+  const sessions = sessionsFor(activeProjectHash);
+  const active = sessions.find((session) => session.session_id === activeId) ?? sessions[0];
+  const threadId = active?.session_id;
+  const messages = (threadId ? threads[threadId] ?? [] : []).filter(isChatMessage);
+  if (pendingReply && pendingReply.id === threadId) messages.push(pendingReply.message);
 
-  // Cập nhật activeId khi danh sách conversations thay đổi
-  useEffect(() => {
-    if (conversations.length > 0) {
-      const exists = conversations.some((c) => c.id === activeId);
-      if (!exists || !activeId) {
-        setActiveId(conversations[0].id);
-      }
-    } else {
-      setActiveId('');
-    }
-  }, [conversations, activeId]);
-
-  const active = conversations.find((c) => c.id === activeId) ?? {
-    id: 'empty',
-    title: 'Cuộc trò chuyện mới',
+  const rememberMessages = (id: string, items: unknown[]) => {
+    threadsRef.current = { ...threadsRef.current, [id]: items };
+    setThreads(threadsRef.current);
   };
 
-  const currentProject = effectiveProjects.find((p) => p.project_hash === activeProjectHash);
-  const projectTitle = currentProject?.project_name ?? (graphData?.project_hash ? 'Synapse OS' : 'Chưa mở dự án');
+  const loadMessages = useCallback(async (hash: string | null, id: string) => {
+    if (threadsRef.current[id]) return threadsRef.current[id];
+    const items = await window.synapse.getChatMessages(hash, id);
+    if (!threadsRef.current[id]) rememberMessages(id, items);
+    return threadsRef.current[id];
+  }, []);
 
-  const threadId = activeId || activeProjectHash || 'default';
-  const messages = threads[threadId] ?? [
-    {
-      id: 'welcome',
-      author: 'system',
-      authorName: 'AGENT HQ',
-      time: now(),
-      text: 'Chào mừng bạn đến với Synapse OS. Hãy nhập yêu cầu để Triage Router điều phối các Agent xử lý.',
-    },
-  ];
+  useEffect(() => {
+    if (!threadId) return;
+    let cancelled = false;
+    void loadMessages(activeProjectHash, threadId).catch((error: unknown) => {
+      if (!cancelled) setChatError(chatErrorMessage(error));
+    });
+    return () => { cancelled = true; };
+  }, [activeProjectHash, threadId, loadMessages]);
 
-  const handleSend = useCallback(
-    async (text: string, target: TargetAgent, files: File[]) => {
+  const selectChat = (hash: string | null, id = '') => {
+    navigation.current += 1;
+    setChatError(null);
+    setActiveId(id);
+    if (activeProjectHash !== hash) void selectProject(hash);
+  };
+
+  const createChat = async (hash: string | null) => {
+    const revision = navigation.current;
+    if (!window.synapse) throw new Error('Hãy mở Synapse OS bằng Electron để quản lý cuộc trò chuyện.');
+    const current = await window.synapse.getChatSessions(hash);
+    const existing = new Set(current.map((item) => item.session_id));
+    const updated = await mutateChatSession({
+      action: 'CREATE',
+      project_hash: hash,
+      new_title: `Cuộc trò chuyện ${current.length + 1}`,
+    });
+    const session = updated.find((item) => !existing.has(item.session_id));
+    if (!session) throw new Error('Không tìm thấy cuộc trò chuyện vừa tạo.');
+    if (revision === navigation.current) selectChat(hash, session.session_id);
+    return session.session_id;
+  };
+
+  const newConversation = async (hash: string | null) => {
+    if (creating.current) return;
+    creating.current = true;
+    setCreatePending(true);
+    setChatError(null);
+    try {
+      await createChat(hash);
+    } catch (error) {
+      setChatError(chatErrorMessage(error));
+    } finally {
+      creating.current = false;
+      setCreatePending(false);
+    }
+  };
+
+  const handleSend = async (text: string, target: TargetAgent, files: File[]) => {
+    if (sending.current || creating.current) return;
+    sending.current = true;
+    setSendPending(true);
+    setChatError(null);
+    try {
+      const hash = activeProjectHash;
+      let id = threadId;
+      if (!id) {
+        creating.current = true;
+        try { id = await createChat(hash); }
+        finally { creating.current = false; }
+      }
+      const sessionId = id;
+      const previous = await loadMessages(hash, sessionId);
+      const persist = async (items: unknown[]) => {
+        await saveChatMessages(hash, sessionId, items);
+        rememberMessages(sessionId, items);
+      };
       const agent = target === 'auto' ? networkSettings.default_chat_agent_id : target;
       const isGemini = agent === 'gemini' || agent === 'gemini_antigravity';
-      const userMsg: ChatMessage = {
+      const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         author: 'user',
         authorName: 'Bạn',
         time: now(),
         text,
-        attachments: files.map((f) => ({
-          name: f.name,
-          sizeLabel: `${(f.size / 1024 / 1024).toFixed(1)} MB`,
-          kind: f.type.startsWith('video') ? 'video' : 'file',
+        attachments: files.map((file) => ({
+          name: file.name,
+          sizeLabel: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+          kind: file.type.startsWith('video') ? 'video' : 'file',
         })),
       };
-      const unavailable = !isGemini ? (agent === 'auto'
-        ? 'Chọn @Gemini để gửi tin nhắn hoặc đặt Gemini làm agent chat mặc định.'
-        : `Luồng gửi tin nhắn cho ${getAgentMeta(agent).label} chưa được nối.`)
-        : files.length ? 'Luồng chat Gemini hiện hỗ trợ văn bản. Hãy gửi lại tin nhắn không kèm tệp.'
-        : geminiPending.current ? 'Gemini đang xử lý một tin nhắn khác. Hãy đợi phản hồi rồi gửi lại.'
-        : !window.synapse?.sendGeminiMessage ? 'Hãy mở bản Synapse OS Electron mới để gửi tin nhắn.' : null;
       const response: ChatMessage = {
         id: crypto.randomUUID(),
         author: 'system',
-        authorName: isGemini ? 'Gemini' : 'AGENT HQ',
+        authorName: 'AGENT HQ',
         time: now(),
-        text: unavailable ?? 'Đang chờ Gemini trả lời…',
+        text: '',
       };
-      setThreads((t) => ({ ...t, [threadId]: [...(t[threadId] ?? []), userMsg, response] }));
-      if (unavailable) return;
-      geminiPending.current = true;
-      const finish = (reply: string, failed = false) => {
-        setThreads((state) => ({
-          ...state,
-          [threadId]: (state[threadId] ?? []).map((item) => item.id === response.id
-            ? { ...item, authorName: failed ? 'AGENT HQ' : item.authorName, text: reply, time: now() }
-            : item),
-        }));
-      };
-      try {
-        const history = geminiHistory.current.get(threadId) ?? [];
+      const sent = [...previous, userMessage];
+      if (!isGemini) {
+        response.text = agent === 'auto'
+          ? 'Chọn @Gemini để gửi tin nhắn hoặc đặt Gemini làm agent chat mặc định.'
+          : `Luồng gửi tin nhắn cho ${getAgentMeta(agent).label} chưa được nối.`;
+      } else if (files.length) {
+        response.text = 'Luồng chat Gemini hiện hỗ trợ văn bản. Hãy gửi lại tin nhắn không kèm tệp.';
+      } else {
+        await persist(sent);
+        setPendingReply({ id: sessionId, message: { ...response, authorName: 'Gemini', text: 'Đang chờ Gemini trả lời…' } });
+        const history = geminiHistoryFrom(previous);
         const withHistory = `Ngữ cảnh gần đây: ${JSON.stringify(history)}\n\nTin nhắn mới: ${text}`;
-        const message = history.length && withHistory.length <= 32000 ? withHistory : text;
-        const reply = await window.synapse.sendGeminiMessage(message);
-        geminiHistory.current.set(threadId, [
-          ...history.slice(-4),
-          { role: 'user', text: text.slice(0, 1600) },
-          { role: 'assistant', text: reply.slice(0, 1600) },
-        ]);
-        finish(reply);
-      } catch (error) {
-        const reason = error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') : 'Không nhận được phản hồi.';
-        finish(`Không gửi được tới Gemini. ${reason}`, true);
-      } finally {
-        geminiPending.current = false;
+        try {
+          response.text = await window.synapse.sendGeminiMessage(history.length && withHistory.length <= 32000 ? withHistory : text);
+          response.authorName = 'Gemini';
+        } catch (error) {
+          response.text = `Không gửi được tới Gemini. ${chatErrorMessage(error)}`;
+        }
+        response.time = now();
       }
-    },
-    [threadId, networkSettings.default_chat_agent_id],
-  );
+      await persist([...sent, response]);
+    } catch (error) {
+      setChatError(chatErrorMessage(error));
+    } finally {
+      setPendingReply(null);
+      setSendPending(false);
+      sending.current = false;
+    }
+  };
 
-  const newConversation = async () => {
-    if (activeProjectHash) {
-      const updated = await mutateChatSession({
-        action: 'CREATE',
-        project_hash: activeProjectHash,
-        new_title: `Cuộc trò chuyện ${conversations.length + 1}`,
-      });
-      if (updated.length > 0) {
-        setActiveId(updated[0].session_id);
+  const changeChat = async (id: string, action: ChatSessionMutationRequest['action'], newTitle?: string) => {
+    const session = [standaloneSessions, ...effectiveProjects.map((project) => project.sessions)]
+      .flat().find((item) => item.session_id === id);
+    if (!session) return false;
+    setChatError(null);
+    try {
+      await mutateChatSession({ action, project_hash: session.project_hash, session_id: id, new_title: newTitle });
+      if (action === 'DELETE' && threadsRef.current[id]) {
+        const next = { ...threadsRef.current };
+        delete next[id];
+        threadsRef.current = next;
+        setThreads(next);
       }
-    } else {
-      const c: Conversation = {
-        id: crypto.randomUUID(),
-        title: `Cuộc trò chuyện ${conversations.length + 1}`,
-        updatedAt: Date.now(),
-      };
-      setLocalConversations((prev) => [c, ...prev]);
-      setActiveId(c.id);
+      return true;
+    } catch (error) {
+      setChatError(chatErrorMessage(error));
+      return false;
     }
   };
 
   const handleTogglePin = async (id: string) => {
-    if (activeProjectHash) {
-      await mutateChatSession({
-        action: 'TOGGLE_PIN',
-        project_hash: activeProjectHash,
-        session_id: id,
-      });
-    } else {
-      setLocalConversations((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, isPinned: !c.isPinned } : c)),
-      );
-    }
-    setMenuTarget(null);
+    if (await changeChat(id, 'TOGGLE_PIN')) setMenuTarget(null);
   };
 
   const handleConfirmRename = async (id: string, newTitle: string) => {
-    if (activeProjectHash) {
-      await mutateChatSession({
-        action: 'RENAME',
-        project_hash: activeProjectHash,
-        session_id: id,
-        new_title: newTitle,
-      });
-    } else {
-      setLocalConversations((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c)),
-      );
-    }
-    setRenameTarget(null);
+    if (await changeChat(id, 'RENAME', newTitle)) setRenameTarget(null);
   };
 
   const handleConfirmDelete = async (id: string) => {
-    if (activeProjectHash) {
-      await mutateChatSession({
-        action: 'DELETE',
-        project_hash: activeProjectHash,
-        session_id: id,
-      });
-    } else {
-      setLocalConversations((prev) => prev.filter((c) => c.id !== id));
-    }
-    setDeleteTarget(null);
+    if (await changeChat(id, 'DELETE')) setDeleteTarget(null);
   };
 
   // Xử lý Ghim / Bỏ ghim dự án
@@ -326,10 +355,7 @@ export default function App() {
     });
 
     if (activeProjectHash === projectHash) {
-      const remaining = effectiveProjects.filter((p) => p.project_hash !== projectHash);
-      if (remaining.length > 0) {
-        selectProject(remaining[0].project_hash);
-      }
+      selectChat(null);
     }
     setProjectDeleteTarget(null);
   };
@@ -339,7 +365,19 @@ export default function App() {
     openingProject.current = true;
     setProjectError(null);
     try {
-      await pickShadowProject();
+      const project = await pickShadowProject();
+      if (project) {
+        navigation.current += 1;
+        setActiveId('');
+        setChatError(null);
+        if (projectOverrides[project.project_hash]?.isDeleted) {
+          setProjectOverrides((prev) => {
+            const next = { ...prev, [project.project_hash]: { ...prev[project.project_hash], isDeleted: false } };
+            saveProjectOverrides(next);
+            return next;
+          });
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setProjectError(message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ''));
@@ -353,51 +391,57 @@ export default function App() {
       {/* TopBar Header */}
       <TopBar
         projectTitle={projectTitle}
-        mode={mode}
+        mode={currentProject ? mode : 'chat'}
+        graphAvailable={!!currentProject}
         onModeChange={setMode}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onSelectProject={handleOpenProjectFolder}
       />
 
       {projectError && <p role="alert" className="text-sm text-red-300">Không thể mở dự án. {projectError}</p>}
+      {chatError && <p role="alert" className="text-sm text-red-300">{chatError}</p>}
 
       {/* Main 3-Column Layout */}
       <div className="flex min-h-0 flex-1 gap-3">
         {/* Left Column: Sidebar (225px) */}
         <Sidebar
-          conversations={conversations}
-          activeId={activeId}
-          onSelect={setActiveId}
-          onNew={newConversation}
+          standaloneSessions={standaloneSessions}
+          activeId={threadId}
+          onSelect={(id) => selectChat(null, id)}
+          onNew={() => void newConversation(null)}
           quota={quota}
           live={live}
           onOpenChatMenu={(target) => setMenuTarget(target)}
           projects={effectiveProjects}
           activeProjectHash={activeProjectHash}
-          onSelectProject={selectProject}
+          onSelectProject={(hash) => selectChat(hash)}
+          onSelectProjectChat={selectChat}
+          onNewProjectChat={(hash) => void newConversation(hash)}
           onOpenProject={handleOpenProjectFolder}
           onOpenProjectMenu={(target) => setProjectMenuTarget(target)}
         />
 
         {/* Center Column: Chat & Preview */}
         <ChatPanel
-          title={active.title}
-          projectPathSubtitle={`${projectTitle} / Chat dự án`}
+          key={threadId ?? activeProjectHash ?? 'standalone'}
+          title={active?.title ?? 'Cuộc trò chuyện mới'}
+          projectPathSubtitle={currentProject ? `${projectTitle} / Chat dự án` : 'Chat độc lập'}
           messages={messages}
           connectedAgents={quota}
           onSend={handleSend}
-          onFocusGraph={() => setMode('graph')}
+          sendDisabled={sendPending || createPending}
+          onFocusGraph={currentProject ? () => setMode('graph') : undefined}
         />
 
         {/* Right Column: Knowledge Graph + DAG Task Tree (When Chat + Graph mode is active) */}
-        {mode === 'graph' && (
+        {mode === 'graph' && currentProject && (
           <aside className="flex min-h-0 w-[480px] shrink-0 flex-col gap-3 xl:w-[540px]">
             <div className="h-[55%] min-h-0">
               <KnowledgeGraphPanel
                 isRunning={true}
                 activeEvent={graphActiveEvent}
                 graphData={graphData}
-                projectHash={activeProjectHash || 'default'}
+                projectHash={currentProject.project_hash}
                 onControlNode={controlGraphNode}
               />
             </div>

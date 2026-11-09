@@ -12,6 +12,7 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   connectedAgents: AgentQuotaStat[];
   onSend: (text: string, target: TargetAgent, files: File[]) => void;
+  sendDisabled?: boolean;
   onFocusGraph?: () => void;
   onRunCode?: (code: import('./types').ChatCode) => void;
   onApplyCode?: (code: import('./types').ChatCode) => void;
@@ -23,6 +24,7 @@ export function ChatPanel({
   messages,
   connectedAgents,
   onSend,
+  sendDisabled,
   onFocusGraph,
   onRunCode,
   onApplyCode,
@@ -151,7 +153,7 @@ export function ChatPanel({
 
       {/* Footer Smart Input Bar (01 Dashboard.svg) */}
       <footer className="shrink-0 p-4 pt-1">
-        <SmartInputBar onSend={onSend} agents={connectedAgents} />
+        <SmartInputBar onSend={onSend} agents={connectedAgents} sendDisabled={sendDisabled} />
       </footer>
     </section>
   );

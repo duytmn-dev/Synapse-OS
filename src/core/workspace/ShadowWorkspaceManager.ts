@@ -6,7 +6,7 @@ import { isDeepStrictEqual, promisify } from 'node:util';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ChatSessionItem, ChatSessionMutationRequest, ShadowProjectInfo } from '../../shared/types';
 import { ContextHydrator, type HydratedContext } from './ContextHydrator.ts';
-import { withDatabase } from './ShadowWorkspaceDB.ts';
+import { STANDALONE_CHAT_SCHEMA, withDatabase } from './ShadowWorkspaceDB.ts';
 import { projectHash, requiredText, validateHash, WorkspaceError, WorkspacePaths } from './WorkspacePaths.ts';
 
 const execute = promisify(execFile);
@@ -107,7 +107,7 @@ export class ShadowWorkspaceManager {
       .map((hash) => this.access(hash, (db) => this.metadata(db, hash)));
   }
 
-  private sessions(db: DatabaseSync, hash: string): ChatSessionItem[] {
+  private sessions(db: DatabaseSync, hash: string | null): ChatSessionItem[] {
     return db.prepare('SELECT session_id, title, is_pinned, updated_at FROM chat_sessions ORDER BY is_pinned DESC, updated_at DESC, session_id').all().map((row) => {
       if (typeof row.session_id !== 'string' || typeof row.title !== 'string' || typeof row.updated_at !== 'number' || ![0, 1].includes(Number(row.is_pinned))) {
         throw new WorkspaceError('INVALID_SESSION', 'Invalid persisted chat session');
@@ -117,35 +117,48 @@ export class ShadowWorkspaceManager {
   }
 
   listSessions(hash: string | null): ChatSessionItem[] {
-    validateHash(hash);
-    return this.access(hash, (db) => this.sessions(db, hash));
+    if (hash === null && !this.standaloneExists()) return [];
+    return this.accessChats(hash, (db) => this.sessions(db, hash));
+  }
+
+  private standaloneExists(): boolean {
+    try { lstatSync(this.paths.standaloneFile()); return true; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+
+  private accessChats<T>(hash: string | null, run: (db: DatabaseSync) => T, create = false): T {
+    if (hash !== null) return this.access(hash, run);
+    if (!create && !this.standaloneExists()) throw new WorkspaceError('SESSION_NOT_FOUND', 'No standalone chat exists');
+    return withDatabase(this.paths.standaloneFile(create), create, run, STANDALONE_CHAT_SCHEMA);
   }
 
   mutateSession(request: ChatSessionMutationRequest): ChatSessionItem[] {
     if (!request || typeof request !== 'object' || Array.isArray(request)) throw new WorkspaceError('INVALID_ARGUMENT', 'A chat mutation object is required');
     const { action, project_hash: hash, session_id: id, new_title: title } = request;
-    validateHash(hash);
+    if (hash !== null) validateHash(hash);
     if (!['CREATE', 'RENAME', 'TOGGLE_PIN', 'DELETE'].includes(action)) throw new WorkspaceError('INVALID_ACTION', 'Unsupported chat action');
     if (action === 'CREATE' || action === 'RENAME') requiredText(title, 'new_title');
     if (action !== 'CREATE') requiredText(id, 'session_id');
     if (action === 'CREATE' && id !== undefined) throw new WorkspaceError('INVALID_ARGUMENT', 'CREATE assigns its own session ID');
     let created: { id: string; context: HydratedContext } | undefined;
-    const result = this.access(hash, (db) => {
+    const result = this.accessChats(hash, (db) => {
       const now = Date.now();
       if (action === 'CREATE') {
-        const context = this.hydrator.hydrate(db, hash);
         const sessionId = randomUUID();
+        if (hash !== null) created = { id: sessionId, context: this.hydrator.hydrate(db, hash) };
         db.prepare('INSERT INTO chat_sessions (session_id, title, created_at, updated_at) VALUES (?, ?, ?, ?)').run(sessionId, title!, now, now);
-        created = { id: sessionId, context };
       } else {
-        if (!db.prepare('SELECT 1 FROM chat_sessions WHERE session_id = ?').get(id!)) throw new WorkspaceError('SESSION_NOT_FOUND', 'Session does not belong to this project');
+        if (!db.prepare('SELECT 1 FROM chat_sessions WHERE session_id = ?').get(id!)) throw new WorkspaceError('SESSION_NOT_FOUND', 'Session does not belong to this chat scope');
         if (action === 'DELETE') db.prepare('DELETE FROM chat_sessions WHERE session_id = ?').run(id!);
         if (action === 'RENAME') db.prepare('UPDATE chat_sessions SET title = ?, updated_at = max(updated_at + 1, ?) WHERE session_id = ?').run(title!, now, id!);
         if (action === 'TOGGLE_PIN') db.prepare('UPDATE chat_sessions SET is_pinned = 1 - is_pinned, updated_at = max(updated_at + 1, ?) WHERE session_id = ?').run(now, id!);
       }
-      db.prepare('UPDATE project_metadata SET updated_at = max(updated_at + 1, ?) WHERE project_hash = ?').run(now, hash);
+      if (hash !== null) db.prepare('UPDATE project_metadata SET updated_at = max(updated_at + 1, ?) WHERE project_hash = ?').run(now, hash);
       return this.sessions(db, hash);
-    });
+    }, action === 'CREATE');
     // Only publish RAM context after the SQLite transaction has committed.
     if (created) this.contexts.set(`${hash}:${created.id}`, created.context);
     if (action === 'DELETE') this.contexts.delete(`${hash}:${id}`);
@@ -158,17 +171,40 @@ export class ShadowWorkspaceManager {
   }
 
   saveSessionContent(hash: string, id: string, messages: unknown[], summary: string): void {
+    if (typeof summary !== 'string') throw new WorkspaceError('INVALID_ARGUMENT', 'Summary must be text');
+    this.writeMessages(hash, id, messages, summary);
+  }
+
+  readSessionMessages(hash: string | null, id: string): unknown[] {
     requiredText(id, 'session_id');
-    if (!Array.isArray(messages) || typeof summary !== 'string') throw new WorkspaceError('INVALID_ARGUMENT', 'Messages must be an array and summary must be text');
+    return this.accessChats(hash, (db) => {
+      const row = db.prepare('SELECT messages_json FROM chat_sessions WHERE session_id = ?').get(id);
+      if (!row) throw new WorkspaceError('SESSION_NOT_FOUND', 'Session does not belong to this chat scope');
+      if (typeof row.messages_json !== 'string') throw new WorkspaceError('INVALID_SESSION', 'Invalid stored messages');
+      const messages: unknown = JSON.parse(row.messages_json);
+      if (!Array.isArray(messages)) throw new WorkspaceError('INVALID_SESSION', 'Invalid stored messages');
+      return messages;
+    });
+  }
+
+  saveSessionMessages(hash: string | null, id: string, messages: unknown[]): ChatSessionItem[] {
+    return this.writeMessages(hash, id, messages);
+  }
+
+  private writeMessages(hash: string | null, id: string, messages: unknown[], summary?: string): ChatSessionItem[] {
+    requiredText(id, 'session_id');
+    if (!Array.isArray(messages)) throw new WorkspaceError('INVALID_ARGUMENT', 'Messages must be an array');
     let json: string;
     try {
       json = JSON.stringify(messages);
+      if (Buffer.byteLength(json) > 8 * 1024 * 1024) throw new Error('Message history exceeds 8 MiB');
       if (!isDeepStrictEqual(JSON.parse(json), messages)) throw new Error('Message data would be lost during JSON encoding');
     }
     catch (error) { throw new WorkspaceError('INVALID_ARGUMENT', 'Messages must be JSON serializable', error); }
-    this.access(hash, (db) => {
-      const result = db.prepare('UPDATE chat_sessions SET messages_json = ?, summary_text = ?, updated_at = max(updated_at + 1, ?) WHERE session_id = ?').run(json, summary, Date.now(), id);
-      if (result.changes !== 1) throw new WorkspaceError('SESSION_NOT_FOUND', 'Session does not belong to this project');
+    return this.accessChats(hash, (db) => {
+      const result = db.prepare('UPDATE chat_sessions SET messages_json = ?, summary_text = coalesce(?, summary_text), updated_at = max(updated_at + 1, ?) WHERE session_id = ?').run(json, summary ?? null, Date.now(), id);
+      if (result.changes !== 1) throw new WorkspaceError('SESSION_NOT_FOUND', 'Session does not belong to this chat scope');
+      return this.sessions(db, hash);
     });
   }
 

@@ -1,6 +1,5 @@
 import type { MouseEvent } from 'react';
-import type { AgentQuotaStat, ShadowProjectMeta } from '@shared/types';
-import type { Conversation } from '../chat/types';
+import type { AgentQuotaStat, ChatSessionItem, ShadowProjectMeta } from '@shared/types';
 import {
   IconChat,
   IconDots,
@@ -14,8 +13,8 @@ import type { ChatMenuTarget } from '../chat/ChatManagementModals';
 import type { ProjectMenuTarget } from './ProjectManagementModals';
 
 interface SidebarProps {
-  conversations: Conversation[];
-  activeId: string;
+  standaloneSessions: ChatSessionItem[];
+  activeId?: string;
   onSelect: (id: string) => void;
   onNew: () => void;
   quota: AgentQuotaStat[];
@@ -24,12 +23,14 @@ interface SidebarProps {
   projects?: ShadowProjectMeta[];
   activeProjectHash?: string | null;
   onSelectProject?: (hash: string) => void;
+  onSelectProjectChat: (hash: string, id: string) => void;
+  onNewProjectChat: (hash: string) => void;
   onOpenProject?: () => void;
   onOpenProjectMenu?: (target: ProjectMenuTarget) => void;
 }
 
 export function Sidebar({
-  conversations,
+  standaloneSessions,
   activeId,
   onSelect,
   onNew,
@@ -39,6 +40,8 @@ export function Sidebar({
   projects = [],
   activeProjectHash,
   onSelectProject,
+  onSelectProjectChat,
+  onNewProjectChat,
   onOpenProject,
   onOpenProjectMenu,
 }: SidebarProps) {
@@ -75,12 +78,42 @@ export function Sidebar({
     });
   };
 
-  // Sắp xếp: các đoạn chat được ghim (isPinned) lên đầu
-  const sortedConversations = [...conversations].sort((a, b) => {
-    if (a.isPinned && !b.isPinned) return -1;
-    if (!a.isPinned && b.isPinned) return 1;
-    return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
-  });
+  const renderChat = (chat: ChatSessionItem, select: () => void, projectName?: string) => {
+    const isActive = activeId === chat.session_id && (activeProjectHash ?? null) === chat.project_hash;
+    return (
+      <div
+        key={chat.session_id}
+        className={`group flex items-center justify-between rounded-md px-2 py-1.5 transition ${
+          isActive
+            ? 'border border-[#405672] bg-[#142235] text-[#EAF2FF]'
+            : 'text-[#9DB0C8] hover:bg-[#142235]/60 hover:text-[#EAF2FF]'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={select}
+          aria-current={isActive ? 'true' : undefined}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          {chat.is_pinned ? (
+            <IconPin size={13} className="shrink-0 text-[#58E9A8]" />
+          ) : (
+            <IconChat size={13} className="shrink-0 text-[#8297B2]" />
+          )}
+          <span className="truncate text-[12px]">{chat.title}</span>
+        </button>
+        <button
+          type="button"
+          onClick={(event) => handleOpenMenu(event, chat.session_id, chat.title, chat.is_pinned, projectName)}
+          className="rounded p-0.5 text-[#9DB0C8] opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 hover:text-[#EAF2FF]"
+          title="Menu tùy chọn"
+          aria-label={`Tùy chọn cho ${chat.title}`}
+        >
+          <IconDots size={13} />
+        </button>
+      </div>
+    );
+  };
 
   // Sắp xếp: các dự án được ghim (is_pinned) lên đầu
   const sortedProjects = [...projects].sort((a, b) => {
@@ -109,46 +142,11 @@ export function Sidebar({
           </div>
 
           <div className="flex flex-col gap-0.5">
-            {sortedConversations.length === 0 ? (
+            {standaloneSessions.length === 0 ? (
               <div className="px-2 py-3 text-center text-[11.5px] text-[#8297B2]">
                 Chưa có cuộc trò chuyện
               </div>
-            ) : (
-              sortedConversations.map((c) => {
-                const isActive = activeId === c.id;
-                return (
-                  <div
-                    key={c.id}
-                    onClick={() => onSelect(c.id)}
-                    className={`group flex cursor-pointer items-center justify-between rounded-md px-2 py-1.5 transition ${
-                      isActive
-                        ? 'border border-[#405672] bg-[#142235] text-[#EAF2FF]'
-                        : 'text-[#9DB0C8] hover:bg-[#142235]/60 hover:text-[#EAF2FF]'
-                    }`}
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      {c.isPinned ? (
-                        <IconPin size={13} className="shrink-0 text-[#58E9A8]" />
-                      ) : (
-                        <IconChat size={13} className="shrink-0 text-[#8297B2]" />
-                      )}
-                      <span className="truncate text-[12px]">{c.title}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {c.isPinned && <IconPin size={12} className="text-[#58E9A8]" />}
-                      <button
-                        type="button"
-                        onClick={(e) => handleOpenMenu(e, c.id, c.title, c.isPinned, c.projectHash ?? undefined)}
-                        className="rounded p-0.5 text-[#9DB0C8] opacity-0 transition group-hover:opacity-100 hover:text-[#EAF2FF]"
-                        title="Menu tùy chọn"
-                      >
-                        <IconDots size={13} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
+            ) : standaloneSessions.map((chat) => renderChat(chat, () => onSelect(chat.session_id)))}
           </div>
         </div>
 
@@ -191,39 +189,58 @@ export function Sidebar({
               sortedProjects.map((proj) => {
                 const isActiveProj = proj.project_hash === activeProjectHash;
                 return (
-                  <div
-                    key={proj.project_hash}
-                    onClick={() => onSelectProject?.(proj.project_hash)}
-                    className={`group flex cursor-pointer items-center justify-between rounded-md px-2 py-1.5 transition ${
-                      isActiveProj
-                        ? 'border border-[#405672] bg-[#142235] text-[#EAF2FF]'
-                        : 'text-[#9DB0C8] hover:bg-[#142235]/60 hover:text-[#EAF2FF]'
-                    }`}
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      {proj.is_pinned ? (
-                        <IconPin size={13} className="shrink-0 text-[#58E9A8]" />
-                      ) : (
-                        <IconFolder size={14} className="shrink-0 text-[#8297B2]" />
-                      )}
-                      <span className="truncate text-[12px] font-medium">
-                        {proj.project_name || 'Dự án'}
-                      </span>
-                      <IconShadowDb size={13} className="shrink-0 text-[#78BAFF]" />
+                  <div key={proj.project_hash}>
+                    <div
+                      onClick={() => onSelectProject?.(proj.project_hash)}
+                      className={`group flex cursor-pointer items-center justify-between rounded-md px-2 py-1.5 transition ${
+                        isActiveProj
+                          ? 'border border-[#405672] bg-[#142235] text-[#EAF2FF]'
+                          : 'text-[#9DB0C8] hover:bg-[#142235]/60 hover:text-[#EAF2FF]'
+                      }`}
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        {proj.is_pinned ? (
+                          <IconPin size={13} className="shrink-0 text-[#58E9A8]" />
+                        ) : (
+                          <IconFolder size={14} className="shrink-0 text-[#8297B2]" />
+                        )}
+                        <span className="truncate text-[12px] font-medium">
+                          {proj.project_name || 'Dự án'}
+                        </span>
+                        <IconShadowDb size={13} className="shrink-0 text-[#78BAFF]" />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {proj.is_pinned && <IconPin size={12} className="text-[#58E9A8]" />}
+                        {onOpenProjectMenu && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenProjMenu(e, proj)}
+                            className="rounded p-0.5 text-[#9DB0C8] opacity-0 transition group-hover:opacity-100 hover:text-[#EAF2FF]"
+                            title="Menu tùy chọn dự án"
+                          >
+                            <IconDots size={13} />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      {proj.is_pinned && <IconPin size={12} className="text-[#58E9A8]" />}
-                      {onOpenProjectMenu && (
+                    {isActiveProj && (
+                      <div className="ml-2 flex flex-col gap-0.5 border-l border-[#23344A] pl-2">
                         <button
                           type="button"
-                          onClick={(e) => handleOpenProjMenu(e, proj)}
-                          className="rounded p-0.5 text-[#9DB0C8] opacity-0 transition group-hover:opacity-100 hover:text-[#EAF2FF]"
-                          title="Menu tùy chọn dự án"
+                          onClick={() => onNewProjectChat(proj.project_hash)}
+                          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-[#58E9A8] hover:bg-[#142235]/60"
+                          aria-label={`Tạo chat trong dự án ${proj.project_name}`}
                         >
-                          <IconDots size={13} />
+                          <IconPlus size={13} className="shrink-0" />
+                          <span>Chat mới trong dự án</span>
                         </button>
-                      )}
-                    </div>
+                        {proj.sessions.map((chat) => renderChat(
+                          chat,
+                          () => onSelectProjectChat(proj.project_hash, chat.session_id),
+                          proj.project_name,
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })

@@ -11,6 +11,7 @@ import {
 interface TopBarProps {
   projectTitle: string;
   mode: ViewMode;
+  graphAvailable: boolean;
   onModeChange: (m: ViewMode) => void;
   onOpenSettings?: () => void;
   onSelectProject?: () => void;
@@ -19,6 +20,7 @@ interface TopBarProps {
 export function TopBar({
   projectTitle,
   mode,
+  graphAvailable,
   onModeChange,
   onOpenSettings,
   onSelectProject,
@@ -66,6 +68,7 @@ export function TopBar({
         <button
           type="button"
           onClick={() => onModeChange('graph')}
+          disabled={!graphAvailable}
           className={`flex items-center gap-2 rounded-md px-3.5 py-1 text-[12px] font-medium transition ${
             mode === 'graph'
               ? 'border border-[#405672] bg-[#142235] text-[#58E9A8] shadow-sm'

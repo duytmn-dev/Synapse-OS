@@ -27,7 +27,7 @@ export interface SynapseState {
   graphData: GraphData | null;
   graphActiveEvent: GraphActiveEvent | null;
   shadowProjects: ShadowProjectMeta[];
-  chatSessions: ChatSessionItem[];
+  standaloneSessions: ChatSessionItem[];
   activeProjectHash: string | null;
   networkSettings: AINetworkSettings;
   appearanceSettings: AppearanceSettings;
@@ -130,6 +130,8 @@ const INITIAL_UPDATE_STATUS: UpdateStatus = {
 export function useSynapseBridge() {
   const bridge = getBridge();
   const updatedAgents = useRef(new Set<AgentId>());
+  const projectRevision = useRef(0);
+  const standaloneRevision = useRef(0);
   const [state, setState] = useState<SynapseState>({
     quota: [],
     tasks: [],
@@ -138,7 +140,7 @@ export function useSynapseBridge() {
     graphData: null,
     graphActiveEvent: null,
     shadowProjects: [],
-    chatSessions: [],
+    standaloneSessions: [],
     activeProjectHash: null,
     networkSettings: INITIAL_NETWORK_SETTINGS,
     appearanceSettings: INITIAL_APPEARANCE_SETTINGS,
@@ -151,22 +153,20 @@ export function useSynapseBridge() {
   useEffect(() => {
     if (!bridge) return;
     let disposed = false;
+    const initialProjectRevision = projectRevision.current;
+    const initialStandaloneRevision = standaloneRevision.current;
+
+    void bridge.getShadowProjects().then((shadowProjects) => {
+      if (!disposed) setState((s) => projectRevision.current === initialProjectRevision ? { ...s, shadowProjects } : s);
+    }).catch((error: unknown) => console.warn('[synapse] Không tải được dự án:', error));
+    void bridge.getChatSessions(null).then((standaloneSessions) => {
+      if (!disposed) setState((s) => standaloneRevision.current === initialStandaloneRevision ? { ...s, standaloneSessions } : s);
+    }).catch((error: unknown) => console.warn('[synapse] Không tải được chat độc lập:', error));
 
     // Lấy danh sách Shadow Projects và dữ liệu ban đầu
     const initBridge = async () => {
       try {
-        let projects: ShadowProjectMeta[] = [];
-        if (bridge.getShadowProjects) {
-          try {
-            projects = await bridge.getShadowProjects();
-          } catch (e) {
-            console.warn('[synapse] getShadowProjects warning:', e);
-          }
-        }
-
-        const currentHash = projects[0]?.project_hash ?? null;
-
-        const [tasksSnap, officeSnap, activeRoomsSnap, networkSnap, appearanceSnap, toolsSnap, updatesSnap, storageSnap, sessionsSnap, graphSnap] =
+        const [tasksSnap, officeSnap, activeRoomsSnap, networkSnap, appearanceSnap, toolsSnap, updatesSnap, storageSnap] =
           await Promise.all([
             bridge.getTasks ? bridge.getTasks().catch(() => []) : Promise.resolve([]),
             bridge.getOffice ? bridge.getOffice().catch(() => []) : Promise.resolve([]),
@@ -176,8 +176,6 @@ export function useSynapseBridge() {
             bridge.getToolDependencies ? bridge.getToolDependencies().catch(() => []) : Promise.resolve([]),
             bridge.getUpdateStatus ? bridge.getUpdateStatus().catch(() => null) : Promise.resolve(null),
             bridge.getWorkspaceStorage ? bridge.getWorkspaceStorage().catch(() => null) : Promise.resolve(null),
-            currentHash && bridge.getChatSessions ? bridge.getChatSessions(currentHash).catch(() => []) : Promise.resolve([]),
-            currentHash && bridge.getGraphData ? bridge.getGraphData(currentHash).catch(() => null) : Promise.resolve(null),
           ]);
 
         if (!disposed) {
@@ -190,10 +188,6 @@ export function useSynapseBridge() {
             tasks: tasksSnap ?? prev.tasks,
             office: officeSnap ?? prev.office,
             activeRooms: activeRoomsSnap?.active_rooms ?? prev.activeRooms,
-            shadowProjects: prev.activeProjectHash ? prev.shadowProjects : projects,
-            activeProjectHash: prev.activeProjectHash ?? currentHash,
-            chatSessions: prev.activeProjectHash ? prev.chatSessions : sessionsSnap,
-            graphData: prev.activeProjectHash ? prev.graphData : graphSnap,
             networkSettings: networkSnap ? {
               ...networkSnap,
               agents: prev.networkSettings.agents.map((agent) =>
@@ -243,11 +237,11 @@ export function useSynapseBridge() {
     if (bridge.onGraphActiveEvent) {
       offs.push(
         bridge.onGraphActiveEvent((ev) =>
-          setState((s) => ({
+          setState((s) => s.activeProjectHash === ev.project_hash ? ({
             ...s,
             graphActiveEvent: ev,
             live: true,
-          }))
+          }) : s)
         )
       );
     }
@@ -264,24 +258,14 @@ export function useSynapseBridge() {
     }
     if (bridge.onShadowProjectsUpdated) {
       offs.push(
-        bridge.onShadowProjectsUpdated((projects) =>
+        bridge.onShadowProjectsUpdated((projects) => {
+          projectRevision.current += 1;
           setState((s) => ({
             ...s,
             shadowProjects: projects,
             live: true,
-          }))
-        )
-      );
-    }
-    if (bridge.onChatSessionsUpdated) {
-      offs.push(
-        bridge.onChatSessionsUpdated((sessions) =>
-          setState((s) => ({
-            ...s,
-            chatSessions: sessions,
-            live: true,
-          }))
-        )
+          }));
+        })
       );
     }
 
@@ -291,22 +275,15 @@ export function useSynapseBridge() {
     };
   }, [bridge]);
 
-  // Chọn dự án hoạt động và nạp sessions & graph tương ứng
   const selectProject = useCallback(
-    async (hash: string) => {
-      setState((s) => ({ ...s, activeProjectHash: hash }));
-      if (bridge?.getChatSessions) {
-        try {
-          const sessions = await bridge.getChatSessions(hash);
-          setState((s) => ({ ...s, chatSessions: sessions }));
-        } catch (e) {
-          console.warn('[useSynapseBridge] getChatSessions failed:', e);
-        }
-      }
-      if (bridge?.getGraphData) {
+    async (hash: string | null) => {
+      setState((s) => s.activeProjectHash === hash ? s : {
+        ...s, activeProjectHash: hash, graphData: null, graphActiveEvent: null,
+      });
+      if (hash && bridge?.getGraphData) {
         try {
           const graph = await bridge.getGraphData(hash);
-          setState((s) => ({ ...s, graphData: graph }));
+          setState((s) => s.activeProjectHash === hash ? { ...s, graphData: graph } : s);
         } catch (e) {
           console.warn('[useSynapseBridge] getGraphData failed:', e);
         }
@@ -320,66 +297,43 @@ export function useSynapseBridge() {
       if (!bridge?.pickShadowProject) throw new Error('Hãy mở Synapse OS bằng ứng dụng Electron để chọn thư mục.');
       const meta = await bridge.pickShadowProject();
       if (!meta) return null;
+      projectRevision.current += 1;
       setState((s) => ({
         ...s,
         shadowProjects: [...s.shadowProjects.filter((p) => p.project_hash !== meta.project_hash), meta],
-        activeProjectHash: meta.project_hash,
-        chatSessions: meta.sessions,
-        graphData: s.graphData?.project_hash === meta.project_hash ? s.graphData : null,
-        graphActiveEvent: null,
       }));
-      void bridge.getGraphData(meta.project_hash).then((graph) => {
-        setState((s) => s.activeProjectHash === graph.project_hash ? { ...s, graphData: graph } : s);
-      }).catch((error: unknown) => console.warn('[synapse] Không tải được đồ thị dự án:', error));
+      void selectProject(meta.project_hash);
       return meta;
     },
-    [bridge]
+    [bridge, selectProject]
   );
+
+  const applySessions = useCallback((hash: string | null, sessions: ChatSessionItem[]) => {
+    if (hash === null) {
+      standaloneRevision.current += 1;
+      setState((s) => ({ ...s, standaloneSessions: sessions }));
+    } else {
+      setState((s) => ({
+        ...s,
+        shadowProjects: s.shadowProjects.map((project) => project.project_hash === hash ? { ...project, sessions } : project),
+      }));
+    }
+  }, []);
 
   const mutateChatSession = useCallback(
     async (request: ChatSessionMutationRequest): Promise<ChatSessionItem[]> => {
-      if (bridge?.mutateChatSession) {
-        const updatedSessions = await bridge.mutateChatSession(request);
-        setState((s) => ({ ...s, chatSessions: updatedSessions }));
-        return updatedSessions;
-      }
-      // Fallback local state nếu chạy ngoài Electron
-      const current = [...state.chatSessions];
-      if (request.action === 'CREATE') {
-        const newItem: ChatSessionItem = {
-          session_id: crypto.randomUUID(),
-          project_hash: request.project_hash ?? 'local',
-          title: request.new_title ?? 'Cuộc trò chuyện mới',
-          is_pinned: false,
-          updated_at: Date.now(),
-        };
-        const next = [newItem, ...current];
-        setState((s) => ({ ...s, chatSessions: next }));
-        return next;
-      }
-      if (request.action === 'RENAME' && request.session_id) {
-        const next = current.map((c) =>
-          c.session_id === request.session_id ? { ...c, title: request.new_title ?? c.title, updated_at: Date.now() } : c
-        );
-        setState((s) => ({ ...s, chatSessions: next }));
-        return next;
-      }
-      if (request.action === 'TOGGLE_PIN' && request.session_id) {
-        const next = current.map((c) =>
-          c.session_id === request.session_id ? { ...c, is_pinned: !c.is_pinned, updated_at: Date.now() } : c
-        );
-        setState((s) => ({ ...s, chatSessions: next }));
-        return next;
-      }
-      if (request.action === 'DELETE' && request.session_id) {
-        const next = current.filter((c) => c.session_id !== request.session_id);
-        setState((s) => ({ ...s, chatSessions: next }));
-        return next;
-      }
-      return current;
+      if (!bridge?.mutateChatSession) throw new Error('Hãy mở Synapse OS bằng Electron để quản lý cuộc trò chuyện.');
+      const sessions = await bridge.mutateChatSession(request);
+      applySessions(request.project_hash, sessions);
+      return sessions;
     },
-    [bridge, state.chatSessions]
+    [bridge, applySessions]
   );
+
+  const saveChatMessages = useCallback(async (hash: string | null, id: string, messages: unknown[]) => {
+    if (!bridge?.saveChatMessages) throw new Error('Hãy mở Synapse OS bằng Electron để lưu tin nhắn.');
+    applySessions(hash, await bridge.saveChatMessages(hash, id, messages));
+  }, [bridge, applySessions]);
 
   // Các action IPC thực thi gọi thẳng vào bridge
   const agentConnectionAction = useCallback(
@@ -590,6 +544,7 @@ export function useSynapseBridge() {
     selectProject,
     pickShadowProject,
     mutateChatSession,
+    saveChatMessages,
     agentConnectionAction,
     setFallbackOnError,
     setAgentAlertThreshold,

@@ -26,7 +26,10 @@ export const IPC = {
   getShadowProjects: 'synapse:shadow:list',
   shadowProjectsUpdated: 'shadow_projects_update',
   getChatSessions: 'synapse:chat:list',
+  getChatMessages: 'synapse:chat:messages:get',
+  saveChatMessages: 'synapse:chat:messages:save',
   mutateChatSession: 'synapse:chat:mutate',
+  sendGeminiMessage: 'synapse:chat:gemini',
   chatSessionsUpdated: 'chat_sessions_update',
   getTaskTree: 'synapse:task_tree:get',
   taskTreeUpdated: 'task_tree_update',
@@ -70,8 +73,11 @@ export interface SynapseRequests {
   getShadowProjects(): Promise<ShadowProjectMeta[]>;
   // null selects standalone conversations; no implicit current project.
   getChatSessions(projectHash: string | null): Promise<ChatSessionItem[]>;
+  getChatMessages(projectHash: string | null, sessionId: string): Promise<unknown[]>;
+  saveChatMessages(projectHash: string | null, sessionId: string, messages: unknown[]): Promise<ChatSessionItem[]>;
   // Returns the affected scope's remaining sessions, including after DELETE.
   mutateChatSession(request: ChatSessionMutationRequest): Promise<ChatSessionItem[]>;
+  sendGeminiMessage(message: string): Promise<string>;
   getTaskTree(): Promise<TaskTreeSnapshot>;
   getAINetworkSettings(): Promise<AINetworkSettings>;
   setDefaultChatAgent(agentId: AINetworkSettings['default_chat_agent_id']): Promise<AINetworkSettings>;
@@ -110,7 +116,10 @@ export const REQUEST_CHANNELS = {
   pickShadowProject: IPC.pickShadowProject,
   getShadowProjects: IPC.getShadowProjects,
   getChatSessions: IPC.getChatSessions,
+  getChatMessages: IPC.getChatMessages,
+  saveChatMessages: IPC.saveChatMessages,
   mutateChatSession: IPC.mutateChatSession,
+  sendGeminiMessage: IPC.sendGeminiMessage,
   getTaskTree: IPC.getTaskTree,
   getAINetworkSettings: IPC.getAINetworkSettings,
   setDefaultChatAgent: IPC.setDefaultChatAgent,

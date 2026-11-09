@@ -25,11 +25,14 @@ export function createWorkspaceHandlers(manager: ShadowWorkspaceManager, getCont
     },
     getShadowProjects: async () => manager.listProjects(),
     getChatSessions: async (hash) => manager.listSessions(hash),
+    getChatMessages: async (hash, id) => manager.readSessionMessages(hash, id),
+    saveChatMessages: async (hash, id, messages) => manager.saveSessionMessages(hash, id, messages),
     mutateChatSession: async (request) => {
       const result = manager.mutateSession(request);
       publish(IPC.chatSessionsUpdated, () => result);
-      publish(IPC.shadowProjectsUpdated, () => manager.listProjects());
+      if (request.project_hash !== null) publish(IPC.shadowProjectsUpdated, () => manager.listProjects());
       return result;
     },
-  } satisfies Pick<SynapseRequests, 'openShadowProject' | 'pickShadowProject' | 'getShadowProjects' | 'getChatSessions' | 'mutateChatSession'>;
+  } satisfies Pick<SynapseRequests, 'openShadowProject' | 'pickShadowProject' | 'getShadowProjects' |
+    'getChatSessions' | 'getChatMessages' | 'saveChatMessages' | 'mutateChatSession'>;
 }

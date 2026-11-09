@@ -20,7 +20,6 @@ export function projectHash(projectPath: string): string {
 }
 
 export function validateHash(value: unknown): asserts value is string {
-  if (value === null) throw new WorkspaceError('UNSUPPORTED_SCOPE', 'Standalone chats have no storage contract in Phase 1');
   if (typeof value !== 'string' || !/^[a-f0-9]{16}$/.test(value)) {
     throw new WorkspaceError('INVALID_PROJECT_HASH', 'An explicit 16-character project hash is required');
   }
@@ -63,25 +62,37 @@ export class WorkspacePaths {
     }
   }
 
-  directory(hash: string, create = false): string {
-    validateHash(hash);
-    const directory = path.join(this.projects, hash);
+  private ensureDirectories(targets: string[], create: boolean): string {
     // No redirected component anywhere under userData is allowed.
-    for (const target of [this.userData, this.projects, directory]) {
+    for (const target of targets) {
       if (prospectiveRealPath(target) !== target) throw new WorkspaceError('UNSAFE_STORAGE_PATH', 'Storage directory was redirected');
       try {
         const info = lstatSync(target);
         if (info.isSymbolicLink() || !info.isDirectory()) throw new WorkspaceError('UNSAFE_STORAGE_PATH', 'Storage must be an ordinary directory');
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
+    const directory = targets[targets.length - 1];
     if (create) mkdirSync(directory, { recursive: true });
     return directory;
   }
 
+  directory(hash: string, create = false): string {
+    validateHash(hash);
+    return this.ensureDirectories([this.userData, this.projects, path.join(this.projects, hash)], create);
+  }
+
+  standaloneFile(create = false): string {
+    const directory = this.ensureDirectories([this.userData, path.join(this.userData, 'chats')], create);
+    return this.safeFile(directory, 'standalone.db', true);
+  }
+
   file(hash: string, name: 'project.db' | 'graph.json', create = false): string {
-    const directory = this.directory(hash, create);
+    return this.safeFile(this.directory(hash, create), name, name === 'project.db');
+  }
+
+  private safeFile(directory: string, name: string, sqlite: boolean): string {
     // SQLite sidecars must obey the same rule as the database itself.
-    for (const entry of name === 'project.db' ? [name, `${name}-journal`, `${name}-wal`, `${name}-shm`] : [name]) {
+    for (const entry of sqlite ? [name, `${name}-journal`, `${name}-wal`, `${name}-shm`] : [name]) {
       try {
         const info = lstatSync(path.join(directory, entry));
         if (info.isSymbolicLink() || !info.isFile() || info.nlink !== 1) {

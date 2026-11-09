@@ -7,9 +7,10 @@ import { IconChevronDown, IconPaperclip, IconSendPlane, IconX } from '../icons';
 interface SmartInputBarProps {
   onSend: (text: string, target: TargetAgent, files: File[]) => void;
   agents: AgentQuotaStat[];
+  sendDisabled?: boolean;
 }
 
-export function SmartInputBar({ onSend, agents }: SmartInputBarProps) {
+export function SmartInputBar({ onSend, agents, sendDisabled }: SmartInputBarProps) {
   const [text, setText] = useState('');
   const [target, setTarget] = useState<TargetAgent>('auto');
   const [files, setFiles] = useState<File[]>([]);
@@ -18,7 +19,7 @@ export function SmartInputBar({ onSend, agents }: SmartInputBarProps) {
 
   const submit = () => {
     const t = text.trim();
-    if (!t && files.length === 0) return;
+    if (sendDisabled || (!t && files.length === 0)) return;
     onSend(t, target, files);
     setText('');
     setFiles([]);
@@ -172,7 +173,7 @@ export function SmartInputBar({ onSend, agents }: SmartInputBarProps) {
         <button
           type="button"
           onClick={submit}
-          disabled={!text.trim() && files.length === 0}
+          disabled={sendDisabled || (!text.trim() && files.length === 0)}
           className="flex h-[29px] items-center gap-1.5 rounded-[6px] border border-[#58E9A8] bg-[#58E9A8] px-3.5 text-[12px] font-semibold text-[#071912] shadow-sm transition hover:bg-[#6af2b4] disabled:opacity-40"
         >
           <IconSendPlane size={14} className="text-[#071912]" />

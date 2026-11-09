@@ -54,6 +54,7 @@ function registerIPC(): void {
   secretStore = new SecretStore(path.join(app.getPath('userData'), 'secrets'));
   const userData = app.getPath('userData');
   const codexAuth = new CodexBrowserAuth(userData, (url) => shell.openExternal(url));
+  const antigravity = new AntigravityBrowserAuth(userData);
   const chatgptAuth = new ChatGPTViaCodexAuth({
     isChatGPTLinked: () => settingsService.isChatGPTLinked(),
     setChatGPTLinked: (linked) => settingsService.setChatGPTLinked(linked),
@@ -64,7 +65,7 @@ function registerIPC(): void {
   }, new ProviderRegistry(userData, codexAuth, {
     chatgpt: { display_name: 'ChatGPT', role_description: 'Tài khoản ChatGPT dùng chung với Codex', auth: chatgptAuth },
     claude: { display_name: 'Claude', role_description: 'Claude Code', auth: new ClaudeBrowserAuth(userData) },
-    gemini: { display_name: 'Gemini', role_description: 'Google Antigravity CLI', auth: new AntigravityBrowserAuth(userData) },
+    gemini: { display_name: 'Gemini', role_description: 'Google Antigravity CLI', auth: antigravity },
   }));
   knowledgeGraphService = new KnowledgeGraphService(shadowWorkspaceManager);
   disposePhase0 = registerPhase0Handlers(ipcMain, () => mainWindow?.webContents ?? null,
@@ -78,6 +79,7 @@ function registerIPC(): void {
       }),
       ...createSettingsHandlers(settingsService, new SystemSettingsService(app.getPath('userData'), app.getVersion())),
       ...createGraphHandlers(knowledgeGraphService, () => mainWindow?.webContents ?? null),
+      sendGeminiMessage: (message) => antigravity.sendMessage(message),
       getTaskTree: async () => {
         const currentTasks = dagExecutor.getTasks();
         const completed = currentTasks.filter((t) => t.status === 'COMPLETED').length;
