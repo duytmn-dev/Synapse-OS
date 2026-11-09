@@ -88,9 +88,9 @@ const INITIAL_NETWORK_SETTINGS: AINetworkSettings = {
       display_name: 'Codex',
       role_description: 'Thực thi mã nguồn và DAG pipelines',
       connection_status: 'DISCONNECTED',
-      auth_method: 'OAuth',
-      quota_5h_percent: 0,
-      quota_week_percent: 0,
+      auth_method: 'Chưa đăng nhập ChatGPT',
+      quota_5h_percent: null,
+      quota_week_percent: null,
       fallback_api: { is_configured: false, use_fallback_on_error: false, is_valid: false },
     },
     {
@@ -190,7 +190,11 @@ export function useSynapseBridge() {
             activeProjectHash: prev.activeProjectHash ?? currentHash,
             chatSessions: prev.activeProjectHash ? prev.chatSessions : sessionsSnap,
             graphData: prev.activeProjectHash ? prev.graphData : graphSnap,
-            networkSettings: networkSnap ?? prev.networkSettings,
+            networkSettings: networkSnap ? {
+              ...networkSnap,
+              agents: prev.networkSettings.agents.map((agent) =>
+                networkSnap.agents.find((profile) => profile.agent_id === agent.agent_id) ?? agent),
+            } : prev.networkSettings,
             appearanceSettings: (appearanceSnap as AppearanceSettings) ?? prev.appearanceSettings,
             toolDependencies: toolsSnap && toolsSnap.length > 0 ? toolsSnap : prev.toolDependencies,
             updateStatus: updatesSnap ?? prev.updateStatus,
@@ -386,6 +390,7 @@ export function useSynapseBridge() {
         }));
         return updated;
       }
+      if (agentId === 'codex') throw new Error('Hãy mở Synapse OS bằng ứng dụng Electron để đăng nhập Codex.');
       const agent = state.networkSettings.agents.find((a) => a.agent_id === agentId);
       const nextStatus = action === 'DISCONNECT' ? 'DISCONNECTED' : 'CONNECTED';
       const fallbackProfile: AgentSettingsProfile = agent

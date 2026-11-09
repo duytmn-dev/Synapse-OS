@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { IPC } from './ipc';
@@ -19,6 +19,8 @@ import { SystemSettingsService } from './SystemSettingsService.ts';
 import { createSettingsHandlers, registerSettingsCredentials } from './SettingsHandlers.ts';
 import { KnowledgeGraphService } from '../adapters/graphify/KnowledgeGraphService.ts';
 import { createGraphHandlers } from './GraphHandlers.ts';
+import { ProviderRegistry } from '../adapters/ProviderRegistry.ts';
+import { CodexBrowserAuth } from '../adapters/CodexBrowserAuth.ts';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -47,10 +49,12 @@ function registerIPC(): void {
   graphEventBridge = new GraphEventBridge(graphActivity, () => mainWindow?.webContents ?? null);
   agentStatusBridge = new AgentStatusBridge(ipcMain, () => mainWindow?.webContents ?? null);
   secretStore = new SecretStore(path.join(app.getPath('userData'), 'secrets'));
-  settingsService = new SettingsService(app.getPath('userData'), secretStore, (agent, status) => {
+  const userData = app.getPath('userData');
+  const codexAuth = new CodexBrowserAuth(userData, (url) => shell.openExternal(url));
+  settingsService = new SettingsService(userData, secretStore, (agent, status) => {
     agentStatusBridge?.update({ agent_id: agent, connection_status: status.connection_status,
       worker_model_name: status.worker_model_name, keychain_configured: null });
-  });
+  }, new ProviderRegistry(userData, codexAuth));
   knowledgeGraphService = new KnowledgeGraphService(shadowWorkspaceManager);
   disposePhase0 = registerPhase0Handlers(ipcMain, () => mainWindow?.webContents ?? null,
     { ...createWorkspaceHandlers(shadowWorkspaceManager, () => mainWindow?.webContents ?? null, async () => {

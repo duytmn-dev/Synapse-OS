@@ -34,8 +34,8 @@ export function registerSettingsCredentials(ipc: Pick<IpcMain, 'handle' | 'remov
   try {
     ipc.handle(IPC.getQuota, async (event) => {
       authorize(event);
-      return (await settings.network()).agents.map((agent) => ({ agent_id: agent.agent_id,
-        usage_5h_percent: agent.quota_5h_percent, usage_week_percent: agent.quota_week_percent }));
+      return (await settings.network()).agents.flatMap((agent) => agent.quota_5h_percent === null || agent.quota_week_percent === null
+        ? [] : [{ agent_id: agent.agent_id, usage_5h_percent: agent.quota_5h_percent, usage_week_percent: agent.quota_week_percent }]);
     });
   } catch (error) { ipc.removeHandler(IPC.saveKey); throw error; }
   return () => { ipc.removeHandler(IPC.saveKey); ipc.removeHandler(IPC.getQuota); };

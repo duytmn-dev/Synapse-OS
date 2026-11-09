@@ -7,6 +7,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'nod
 import { createHash } from 'node:crypto';
 import { checkProviderKey } from '../../src/adapters/ProviderProbe.ts';
 import { ProviderRegistry } from '../../src/adapters/ProviderRegistry.ts';
+import { CodexBrowserAuth } from '../../src/adapters/CodexBrowserAuth.ts';
 import { SettingsStore } from '../../src/main/SettingsStore.ts';
 import { SettingsService } from '../../src/main/SettingsService.ts';
 import { SystemSettingsService } from '../../src/main/SystemSettingsService.ts';
@@ -23,6 +24,90 @@ function fixture(t: TestContext) {
   return root;
 }
 const noSecrets = { read: async () => null, save: async () => { throw new Error('Unexpected secret write'); } };
+
+test('built-in Codex uses browser OAuth without provider config and reads actual quota windows', async (t) => {
+  const root = fixture(t);
+  const script = path.join(root, 'codex-fixture.cjs');
+  writeFileSync(script, `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const readline = require('node:readline');
+    const session = path.join(process.env.CODEX_HOME, 'fixture-session');
+    const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+    readline.createInterface({ input: process.stdin }).on('line', (line) => {
+      const { id, method, params } = JSON.parse(line);
+      if (id === undefined) return;
+      let result = {};
+      if (method === 'account/login/start') {
+        if (params.type !== 'chatgpt') process.exit(2);
+        result = { type: 'chatgpt', loginId: 'test', authUrl: 'https://auth.openai.com/oauth/authorize' };
+      } else if (method === 'account/read') {
+        result = { account: fs.existsSync(session) ? { type: 'chatgpt', email: 'private@example.invalid' } : null };
+      } else if (method === 'account/rateLimits/read') {
+        result = { rateLimits: { primary: { windowDurationMins: 15, usedPercent: 99 }, secondary: { windowDurationMins: 10080, usedPercent: 27 } } };
+      } else if (method === 'account/logout') {
+        fs.rmSync(session, { force: true });
+      }
+      send({ id, result });
+      if (method === 'account/login/start') {
+        const timer = setInterval(() => {
+          if (!fs.existsSync(session)) return;
+          clearInterval(timer);
+          send({ method: 'account/login/completed', params: { loginId: 'test', success: true } });
+        }, 25);
+        timer.unref();
+      }
+    });
+  `);
+  const opened: string[] = [];
+  const auth = new CodexBrowserAuth(root, async (url) => {
+    opened.push(url);
+    writeFileSync(path.join(root, 'codex-account', 'fixture-session'), 'fixture only');
+  }, [process.execPath, script]);
+  const service = new SettingsService(root, noSecrets, undefined, new ProviderRegistry(root, auth));
+  assert.equal((await service.network()).agents[0].connection_status, 'DISCONNECTED');
+  const profile = await service.action('codex', 'CONNECT');
+  assert.deepEqual(opened, ['https://auth.openai.com/oauth/authorize']);
+  assert.equal(profile.connection_status, 'CONNECTED');
+  assert.equal(profile.quota_5h_percent, null);
+  assert.equal(profile.quota_week_percent, 27);
+  assert.doesNotMatch(JSON.stringify(profile), /private@example/);
+  assert.equal((await service.action('codex', 'REFRESH')).connection_status, 'CONNECTED');
+  assert.equal((await service.action('codex', 'DISCONNECT')).connection_status, 'DISCONNECTED');
+});
+
+test('Codex cannot open a non-OpenAI authorization URL', async (t) => {
+  const root = fixture(t);
+  const script = path.join(root, 'codex-fixture.cjs');
+  writeFileSync(script, `
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { id, method } = JSON.parse(line);
+      if (id === undefined) return;
+      const result = method === 'account/login/start'
+        ? { type: 'chatgpt', loginId: 'test', authUrl: 'https://auth.openai.com.example.invalid/oauth/authorize' } : {};
+      console.log(JSON.stringify({ id, result }));
+    });
+  `);
+  let opened = false;
+  const auth = new CodexBrowserAuth(root, async () => { opened = true; }, [process.execPath, script]);
+  await assert.rejects(auth.action('CONNECT'), /CODEX_LOGIN_URL_INVALID/);
+  assert.equal(opened, false);
+});
+
+if (process.env.SYNAPSE_CODEX_AUTH_SMOKE === '1') {
+  test('installed Codex creates and cancels an official browser login from isolated AppData', async (t) => {
+    const root = fixture(t);
+    let host: string | undefined;
+    const auth = new CodexBrowserAuth(root, async (url) => {
+      host = new URL(url).hostname;
+      throw new Error('Test cancels before opening a browser');
+    });
+    assert.equal((await auth.action('CHECK_CLI')).connection_status, 'DISCONNECTED');
+    await assert.rejects(auth.action('CONNECT'), /CODEX_BROWSER_OPEN_FAILED/);
+    assert.ok(host === 'auth.openai.com' || host === 'chatgpt.com');
+    assert.equal((await auth.action('CHECK_CLI')).connection_status, 'DISCONNECTED');
+  });
+}
 
 test('unconfigured Settings returns explicit errors instead of fake provider/quotas', async (t) => {
   const root = fixture(t);

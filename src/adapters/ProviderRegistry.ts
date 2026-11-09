@@ -11,17 +11,22 @@ export interface ProviderConfig {
   role_description: string;
   commands: { status: AgentCLIConfig; check_cli?: AgentCLIConfig; connect?: AgentCLIConfig; disconnect?: AgentCLIConfig };
 }
+const codexProfile = { display_name: 'Codex', role_description: 'Thực thi mã nguồn và DAG pipelines' };
+type ProviderDetails = Pick<ProviderConfig, 'display_name' | 'role_description'>;
+type ProviderEntry = ProviderConfig | ProviderDetails;
+type BrowserAuth = Pick<import('./CodexBrowserAuth.ts').CodexBrowserAuth, 'action'>;
 
 /** Trusted backend configuration. CLI wrappers must normalize their verified
  * provider response, including quota, into ProviderStatus JSON. No guessed flags. */
 export class ProviderRegistry {
-  constructor(private readonly userData: string) {}
-  async configurations(): Promise<Partial<Record<AgentId, ProviderConfig>>> {
+  constructor(private readonly userData: string, private readonly codexAuth?: BrowserAuth) {}
+  async configurations(): Promise<Partial<Record<AgentId, ProviderEntry>>> {
     let input: unknown;
     try { input = JSON.parse(await readFile(path.join(this.userData, 'agent-providers.json'), 'utf8')); }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new WorkspaceError('PROVIDER_NOT_CONFIGURED', 'Configure agent-providers.json in userData');
-      throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Cannot read provider configuration');
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Cannot read provider configuration');
+      if (!this.codexAuth) throw new WorkspaceError('PROVIDER_NOT_CONFIGURED', 'Configure agent-providers.json in userData');
+      input = {};
     }
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new WorkspaceError('PROVIDER_CONFIG_INVALID', 'Expected agent configuration object');
     for (const [agent, config] of Object.entries(input)) {
@@ -39,10 +44,12 @@ export class ProviderRegistry {
         }
       }
     }
-    if (!Object.keys(input).length) throw new WorkspaceError('PROVIDER_NOT_CONFIGURED', 'No configured providers');
-    return input as Partial<Record<AgentId, ProviderConfig>>;
+    const configured = input as Partial<Record<AgentId, ProviderEntry>>;
+    if (this.codexAuth && !configured.codex) configured.codex = codexProfile;
+    if (!Object.keys(configured).length) throw new WorkspaceError('PROVIDER_NOT_CONFIGURED', 'No configured providers');
+    return configured;
   }
-  async config(agent: AgentId): Promise<ProviderConfig> {
+  async config(agent: AgentId): Promise<ProviderEntry> {
     validateAgent(agent);
     const config = (await this.configurations())[agent];
     if (!config) throw new WorkspaceError('PROVIDER_NOT_CONFIGURED', `No configuration for ${agent}`);
@@ -54,6 +61,7 @@ export class ProviderRegistry {
   }
   async status(agent: AgentId): Promise<ProviderStatus> {
     const config = await this.config(agent);
+    if (!('commands' in config)) return this.codexAuth!.action('CHECK_CLI');
     let status: ProviderStatus;
     try { status = JSON.parse(await this.execute(config.commands.status)) as ProviderStatus; }
     catch (error) { if (error instanceof WorkspaceError) throw error; throw new WorkspaceError('PROVIDER_STATUS_INVALID', 'Status command must return JSON'); }
@@ -69,6 +77,7 @@ export class ProviderRegistry {
   }
   async action(agent: AgentId, action: 'CONNECT' | 'DISCONNECT' | 'REFRESH' | 'CHECK_CLI'): Promise<ProviderStatus> {
     const config = await this.config(agent);
+    if (!('commands' in config)) return this.codexAuth!.action(action);
     if (action !== 'REFRESH') {
       const name = { CONNECT: 'connect', DISCONNECT: 'disconnect', CHECK_CLI: 'check_cli' }[action] as 'connect' | 'disconnect' | 'check_cli';
       const command = config.commands[name];

@@ -2,8 +2,17 @@
 
 ## Phase 3: provider configuration and real settings
 
-No provider configuration is shipped or inferred from installed applications. Put
-`agent-providers.json` in Electron `userData` (`%APPDATA%/SynapseOS` on Windows).
+The Codex card supports ChatGPT OAuth through the installed Codex App Server.
+Click **Connect** in Settings and finish authorization in the default browser.
+An explicit `SYNAPSE_CODEX_EXECUTABLE` takes priority. Otherwise Synapse OS searches
+PATH and, on Windows, falls back to the installed OpenAI Codex Desktop package
+registered for the current user.
+This connection uses `userData/codex-account` as its Codex home and requires
+Codex's OS credential store. Unknown quotas are shown as a dash. A custom
+`codex` entry overrides the built-in connection.
+
+For custom providers, put `agent-providers.json` in Electron `userData`
+(`%APPDATA%/SynapseOS` on Windows).
 It is a JSON object keyed by canonical `codex`, `gemini`, `chatgpt`, or `claude` IDs.
 Each entry contains `display_name`, `role_description`, and `commands`. A command
 contains an absolute native `executable` path, an optional string-array `args`, and

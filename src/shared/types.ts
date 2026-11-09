@@ -129,8 +129,8 @@ export interface AgentSettingsProfile {
   role_description: string;  // VD: "Điều phối & suy luận", "UI & Vision"
   connection_status: 'CONNECTED' | 'DISCONNECTED' | 'OUT_OF_QUOTA';
   auth_method: string;       // VD: "OAuth · OS Keychain", "Đang chạy qua CLI", "Chưa kết nối"
-  quota_5h_percent: number;
-  quota_week_percent: number;
+  quota_5h_percent: number | null;
+  quota_week_percent: number | null;
   alert_threshold_percent?: number; // Slider ngưỡng cảnh báo (VD: 80)
   fallback_api: {
     is_configured: boolean;

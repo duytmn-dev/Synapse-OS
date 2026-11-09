@@ -387,7 +387,7 @@ export function SettingsModal(props: SettingsModalProps) {
                                   • {agent.auth_method}
                                 </span>
                                 <span className="text-[#8297B2]">
-                                  5h {agent.quota_5h_percent}% · Tuần {agent.quota_week_percent}%
+                                  5h {agent.quota_5h_percent === null ? '—' : `${agent.quota_5h_percent}%`} · Tuần {agent.quota_week_percent === null ? '—' : `${agent.quota_week_percent}%`}
                                 </span>
                               </div>
                             </div>

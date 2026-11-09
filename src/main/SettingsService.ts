@@ -14,8 +14,9 @@ export class SettingsService {
   private readonly verified = new Map<AgentId, string>();
   private readonly queues = new Map<AgentId, Promise<unknown>>();
   constructor(userData: string, private readonly secrets: Pick<SecretStore, 'read' | 'save'>,
-    private readonly onStatus: (agent: AgentId, status: ProviderStatus) => void = () => {}) {
-    this.settings = new SettingsStore(userData); this.providers = new ProviderRegistry(userData);
+    private readonly onStatus: (agent: AgentId, status: ProviderStatus) => void = () => {},
+    providers?: ProviderRegistry) {
+    this.settings = new SettingsStore(userData); this.providers = providers ?? new ProviderRegistry(userData);
   }
   private serial<T>(agent: AgentId, work: () => Promise<T>): Promise<T> {
     validateAgent(agent);
@@ -41,7 +42,8 @@ export class SettingsService {
   }
   async network(): Promise<AINetworkSettings> {
     const configs = await this.providers.configurations();
-    const defaultAgent = (await this.settings.read()).defaultAgent;
+    const defaultAgent = (await this.settings.read()).defaultAgent ??
+      (configs.codex && !('commands' in configs.codex) ? 'codex' : undefined);
     if (!defaultAgent || !configs[defaultAgent]) throw new WorkspaceError('DEFAULT_AGENT_NOT_CONFIGURED', 'Select a configured default chat agent');
     return { default_chat_agent_id: defaultAgent, agents: await Promise.all((Object.keys(configs) as AgentId[]).map((agent) => this.profile(agent))) };
   }
